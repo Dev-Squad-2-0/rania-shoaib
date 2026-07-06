@@ -44,3 +44,54 @@ SELECT column_name, data_type
 FROM information_schema.columns 
 WHERE table_name = 'orders'
 ORDER BY ordinal_position;
+
+select customer_name, sales from orders;
+
+select distinct customer_name from orders;
+
+select distinct region from orders;
+
+select state from orders;
+
+select * from orders where state = 'California';
+
+select customer_name, state, city, sales from orders where state = 'California' and sales > 500;
+
+
+select customer_name, sales from orders
+order by sales desc;
+
+select * from orders 
+order by sales 
+desc 
+limit 5;
+
+select customer_name as customer, sales as order_value from orders
+order by sales desc;
+
+select distinct segment from orders;
+
+select count(*) from orders where segment = 'Consumer';
+
+select sum(sales) from orders;
+
+select avg(profit) from orders;
+
+select min(sales) as cheapest_order, max(sales) as priciest_order from orders;
+
+select region, sum(sales) as total_sales
+from orders
+group by region
+order by total_sales desc
+having sum(sales) > 20000;
+
+select region, sum(sales) as total_sales
+from orders
+group by region
+having sum(sales) > 400000;
+
+select category, count(*) as order_count 
+from orders 
+group by category;
+
+
