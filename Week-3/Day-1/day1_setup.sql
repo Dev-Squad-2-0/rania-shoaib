@@ -1,4 +1,3 @@
--- DROP TABLE IF EXISTS orders;
 CREATE TABLE orders (
     row_id INT PRIMARY KEY,
     order_id VARCHAR(20),
@@ -22,6 +21,23 @@ CREATE TABLE orders (
     discount NUMERIC(4,2),
     profit NUMERIC(10,2)
 );
+
+
+SET datestyle = 'MDY';
+
+COPY orders(row_id, order_id, order_date, ship_date, ship_mode, customer_id, 
+customer_name, segment, country, city, state, postal_code, region, 
+product_id, category, sub_category, product_name, sales, quantity, discount, profit)
+FROM 'D:\Netixsol\Week-3\Day-1\superstore.csv'
+DELIMITER ','
+CSV HEADER;
+
+
+select count(*) from orders;
+
+
+SELECT * FROM orders LIMIT 10;
+
 
 
 SELECT column_name, data_type 
