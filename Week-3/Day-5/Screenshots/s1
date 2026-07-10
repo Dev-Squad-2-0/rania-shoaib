@@ -1,0 +1,6 @@
+"salesorderdetailid","salesorderid","orderdate","order_month","order_quarter","order_year","customerid","salespersonid","territoryid","productid","orderqty","unitprice","unitpricediscount","line_revenue","line_cost","line_profit","category_name","subcategory_name","product_name"
+1,43659,"2022-05-30 00:00:00","2022-05-01","2022-04-01",2022,29825,279,5,776,1,2024.9940,0.0000,2024.99,1898.0944,126.8956,"Bikes","Mountain Bikes","Mountain-100 Black, 42"
+2,43659,"2022-05-30 00:00:00","2022-05-01","2022-04-01",2022,29825,279,5,777,3,2024.9940,0.0000,6074.98,5694.2832,380.6968,"Bikes","Mountain Bikes","Mountain-100 Black, 44"
+3,43659,"2022-05-30 00:00:00","2022-05-01","2022-04-01",2022,29825,279,5,778,1,2024.9940,0.0000,2024.99,1898.0944,126.8956,"Bikes","Mountain Bikes","Mountain-100 Black, 48"
+4,43659,"2022-05-30 00:00:00","2022-05-01","2022-04-01",2022,29825,279,5,771,1,2039.9940,0.0000,2039.99,1912.1544,127.8356,"Bikes","Mountain Bikes","Mountain-100 Silver, 38"
+5,43659,"2022-05-30 00:00:00","2022-05-01","2022-04-01",2022,29825,279,5,772,1,2039.9940,0.0000,2039.99,1912.1544,127.8356,"Bikes","Mountain Bikes","Mountain-100 Silver, 42"
