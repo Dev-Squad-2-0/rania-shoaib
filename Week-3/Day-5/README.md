@@ -37,8 +37,6 @@ line_revenue = ROUND(unitprice * (1 - unitpricediscount) * orderqty, 2)
 
 ### Dataset scale
 
-> Run the query below in your Query Tool and paste the result here.
-
 ```sql
 SELECT
     (SELECT COUNT(*) FROM sales.customer)             AS customers,
@@ -50,30 +48,16 @@ SELECT
     (SELECT COUNT(*) FROM humanresources.employee)      AS employees;
 ```
 
-**Result:**
-
-| customers | sales_orders | sales_order_lines | products | vendors | purchase_orders | employees |
-|---|---|---|---|---|---|---|
-| 19,820 | 31,465 | 121,317 | 504 | 104 | 4,012 | 290 |
-
 ![Query 1 result](Screenshots/q1.png)
 
 Note the 19,820 total customer records is slightly higher than the 19,119 "active purchasing customers" figure used throughout the dashboard observations, the difference (701 customers) represents customer records with zero completed orders, they are excluded from revenue, repeat rate, and segmentation calculations since those are all scoped to customers with `total_orders > 0`.
 
 ### Date range covered
 
-> Run this and paste the result here.
-
 ```sql
 SELECT MIN(orderdate) AS earliest_order, MAX(orderdate) AS latest_order
 FROM sales.salesorderheader;
 ```
-
-**Result:**
-
-| earliest_order | latest_order |
-|---|---|
-| 2022-05-30 | 2025-06-29 |
 
 ![Query 2 result](Screenshots/q2.png)
 
@@ -84,12 +68,6 @@ FROM sales.salesorderheader;
 ```sql
 SELECT pg_size_pretty(pg_database_size('customerstore_db')) AS database_size;
 ```
-
-**Result:**
-
-| database_size |
-|---|
-| 100 MB |
 
 ![Query 3 result](Screenshots/q3.png)
 
@@ -189,12 +167,6 @@ SELECT
     (SELECT COUNT(*) FROM information_schema.tables
        WHERE table_schema = 'analytics' AND table_type = 'BASE TABLE') AS table_count;
 ```
-
-**Result:**
-
-| view_count | table_count |
-|---|---|
-| 20 | 8 |
 
 ![Query 4 result](Screenshots/q4.png)
 
