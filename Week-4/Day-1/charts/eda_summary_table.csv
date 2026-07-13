@@ -1,0 +1,12 @@
+metric,value
+Total rows,48842
+Positive class count (>50K),11687
+Negative class count (<=50K),37155
+Base rate (% positive),23.93%
+Mean age,38.6
+Mean hours-per-week,40.4
+% with capital-gain > 0,8.26%
+"% Bachelors or higher (approx, by education-num>=13)",24.79%
+Missing 'workclass',2799
+Missing 'occupation',2809
+Missing 'native-country',857
