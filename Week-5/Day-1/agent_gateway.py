@@ -23,17 +23,13 @@ import requests
 from dotenv import load_dotenv
 from openai import OpenAI
 
-load_dotenv()  # reads variables from a local .env file into os.environ
+load_dotenv() 
 
 BASE_URL = "https://llm.netixsol.com/v1"
-MODEL_NAME = "smart"  # general-purpose alias; try "reasoner" if this struggles with multi-step tool use
+MODEL_NAME = "smart"  
 MAX_ITERATIONS = 6
 
 
-# ---------------------------------------------------------------------------
-# Tool schemas: OpenAI's function-calling format wraps the same three
-# fields (name, description, parameters) inside a "function" object.
-# ---------------------------------------------------------------------------
 
 TOOLS = [
     {
@@ -85,10 +81,6 @@ TOOLS = [
 ]
 
 
-# ---------------------------------------------------------------------------
-# Tool implementations, identical to agent_from_scratch.py, real APIs,
-# real error handling. Only the surrounding request/response glue differs.
-# ---------------------------------------------------------------------------
 
 def run_calculator(expression: str) -> str:
     try:
@@ -161,18 +153,6 @@ def execute_tool(name: str, tool_input: dict) -> str:
         return f"ERROR: tool '{name}' raised an exception: {e}"
 
 
-# ---------------------------------------------------------------------------
-# The agent loop, OpenAI protocol version.
-#
-# Key differences from the Anthropic version:
-#   - tool calls arrive as `message.tool_calls`, a list of objects with
-#     .id, .function.name, .function.arguments (arguments is a JSON
-#     STRING here, not a dict, so it must be json.loads()'d)
-#   - stopping condition is `finish_reason == "stop"` instead of
-#     `stop_reason != "tool_use"`
-#   - tool results are appended as their own message with role="tool"
-#     and a matching tool_call_id, instead of a tool_result content block
-# ---------------------------------------------------------------------------
 
 def run_agent(client, user_task: str, max_iterations: int = MAX_ITERATIONS):
     print(f"\n=== AGENT START: {user_task!r} ===")
