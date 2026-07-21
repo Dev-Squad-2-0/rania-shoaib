@@ -1,0 +1,13 @@
+city,country,cost_of_living_index,rent_index,groceries_index,restaurant_price_index,local_purchasing_power_index,avg_meal_inexpensive_usd,avg_hostel_night_usd,source_note
+Zurich,Switzerland,131.5,54.7,115.4,121.0,164.4,28,55,Numbeo Cost of Living Index 2026
+New York,United States,100.0,100.0,100.0,100.0,100.0,25,60,Numbeo Cost of Living Index 2026 baseline city
+Reykjavik,Iceland,96.8,42.1,98.2,105.3,110.5,22,45,Numbeo Cost of Living Index 2026
+Tokyo,Japan,72.4,38.9,68.1,58.7,88.2,7,35,Numbeo Cost of Living Index 2026
+Singapore,Singapore,79.6,68.4,71.3,66.9,102.1,6,28,Numbeo Cost of Living Index 2026
+London,United Kingdom,82.3,50.2,76.5,74.1,95.8,15,40,Numbeo Cost of Living Index 2026
+Bangkok,Thailand,42.1,20.3,38.7,32.4,70.5,3,10,Numbeo Cost of Living Index 2026
+Lisbon,Portugal,54.8,29.6,49.2,44.7,79.3,8,25,Numbeo Cost of Living Index 2026
+Mexico City,Mexico,38.9,17.2,35.1,28.6,65.4,4,15,Numbeo Cost of Living Index 2026
+Cape Town,South Africa,40.5,18.9,37.4,30.2,58.1,5,18,Numbeo Cost of Living Index 2026
+Berlin,Germany,66.2,37.4,61.8,55.9,92.7,10,30,Numbeo Cost of Living Index 2026
+Bali,Indonesia,33.7,15.4,29.8,22.1,55.6,3,12,Numbeo Cost of Living Index 2026
