@@ -1,0 +1,31 @@
+ticket_id,date,source,customer_tier,feedback_text
+T-1001,2025-06-22,support_ticket,Enterprise,"App crashed again while exporting, this is the second time this week."
+T-1002,2025-06-23,support_ticket,Pro,App crashed while exporting a large report.
+T-1003,2025-06-24,app_review,Free,"Export feature crashed my whole session, lost my work."
+T-1004,2025-06-25,survey,Enterprise,"Exporting to CSV fails silently, no error message at all."
+T-1005,2025-06-26,support_ticket,Pro,Export button does nothing on Safari.
+T-1006,2025-06-27,app_review,Free,"Please add dark mode, my eyes are dying using this at night."
+T-1007,2025-06-28,app_review,Pro,"Would love a dark mode option, half our team works late."
+T-1008,2025-06-01,survey,Free,Dark mode please! Asked this three months ago.
+T-1009,2025-06-02,app_review,Enterprise,Can you add integration with Slack? We use it for everything.
+T-1010,2025-06-03,support_ticket,Enterprise,Slack integration would save us so much manual copy pasting.
+T-1011,2025-06-04,survey,Pro,Slack or Teams integration would be great.
+T-1012,2025-06-05,support_ticket,Enterprise,Customer support took 3 days to respond to my billing question.
+T-1013,2025-06-06,survey,Pro,"Billing dashboard shows the wrong renewal date, very confusing."
+T-1014,2025-06-07,app_review,Free,"Pricing page is confusing, I couldn't tell which plan I was on."
+T-1015,2025-06-08,support_ticket,Enterprise,"Was overcharged this month, invoice does not match my plan."
+T-1016,2025-06-09,survey,Pro,"The new dashboard is so much faster than before, great job!"
+T-1017,2025-06-10,app_review,Free,"Your support team was amazing, fixed my issue in 10 minutes."
+T-1018,2025-06-11,survey,Enterprise,Really happy with the recent speed improvements on load times.
+T-1019,2025-06-12,support_ticket,Pro,"Search inside the app is broken, returns no results for common terms."
+T-1020,2025-06-13,app_review,Enterprise,"Search feature never returns relevant results, very frustrating."
+T-1021,2025-06-14,survey,Free,Search is basically unusable for our team.
+T-1022,2025-06-15,support_ticket,Pro,Mobile app logs me out randomly every few hours.
+T-1023,2025-06-16,app_review,Enterprise,"Getting logged out constantly on mobile, very disruptive."
+T-1024,2025-06-17,survey,Free,Would like a way to bulk delete old reports.
+T-1025,2025-06-18,app_review,Pro,Bulk actions would save us hours every month.
+T-1026,2025-06-19,support_ticket,Enterprise,API rate limits are too low for our integration.
+T-1027,2025-06-20,survey,Enterprise,"Need higher API rate limits, we are hitting them daily."
+T-1028,2025-06-21,app_review,Free,"Onboarding was confusing, took me a while to find key features."
+T-1029,2025-06-22,survey,Pro,"Great onboarding experience, very smooth setup."
+T-1030,2025-06-23,support_ticket,Free,Notification emails are being marked as spam.
