@@ -1,0 +1,6 @@
+venv-capstone/
+.env
+__pycache__/
+*.pyc
+logs/*.log
+eval/eval_results.csv
