@@ -14,6 +14,17 @@ import sys
 import os
 import time
 import csv
+import logging
+
+os.makedirs(os.path.join(os.path.dirname(__file__), "..", "logs"), exist_ok=True)
+logging.basicConfig(
+    level=logging.INFO,
+    format="%(asctime)s [%(levelname)s] %(message)s",
+    handlers=[
+        logging.FileHandler(os.path.join(os.path.dirname(__file__), "..", "logs", "app.log")),
+        logging.StreamHandler(),
+    ],
+)
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 

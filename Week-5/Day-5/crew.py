@@ -23,8 +23,6 @@ from tools import verify_employment, verify_education, get_reference_notes
 # rate-limit error surfaces immediately and cleanly to our own retry loop.
 litellm.num_retries = 0
 
-print(">>> RUNNING UPDATED CREW.PY <<<")
-
 def get_llm():
     """Reads GROQ_API_KEY at call time (not import time) so tests can run
     without a key present until an actual crew kickoff happens."""
@@ -172,7 +170,7 @@ def _repair_json(raw: str, api_key: str) -> dict:
     make one cheap follow-up call asking the model to fix ONLY the syntax,
     rather than re-running the entire 3-agent crew from scratch. This is
     much cheaper on the token budget than a full retry."""
-    repair_llm = LLM(model="groq/openai/gpt-oss-120b", api_key=api_key, temperature=0.0)
+    repair_llm = LLM(model="groq/llama-3.3-70b-versatile", api_key=api_key, temperature=0.0)
     prompt = (
         "The following text was supposed to be a single valid JSON object but "
         "failed to parse. Fix ONLY syntax problems (e.g. resolve any leftover "
@@ -192,10 +190,12 @@ def _repair_json(raw: str, api_key: str) -> dict:
 
 def run_verification(candidate: dict, max_retries: int = 6) -> dict:
     """Runs the crew and parses the final JSON report. Retries on rate-limit
-    errors with backoff, since Groq's free tier (8000 TPM for gpt-oss-120b)
-    is easily exceeded by a 3-agent sequential crew run back-to-back with
-    other calls. Raises on total failure so the caller (LangGraph node) can
-    catch and handle it gracefully."""
+    errors with backoff, since Groq's free tier is easily exceeded by a
+    3-agent sequential crew run back-to-back with other calls. Raises on
+    total failure so the caller (LangGraph node) can catch and handle it
+    gracefully. Returns the parsed report dict with a "_token_usage" key
+    attached for logging/monitoring -- stripped before the report is shown
+    to a human reviewer."""
     last_error = None
     for attempt in range(max_retries):
         try:
@@ -208,13 +208,19 @@ def run_verification(candidate: dict, max_retries: int = 6) -> dict:
                 if raw.startswith("json"):
                     raw = raw[4:].strip()
 
+            usage = getattr(crew, "usage_metrics", None)
+            token_usage = usage.model_dump() if usage and hasattr(usage, "model_dump") else (dict(usage) if usage else {})
+
             try:
-                return json.loads(raw)
+                parsed = json.loads(raw)
             except json.JSONDecodeError:
                 try:
-                    return _repair_json(raw, os.getenv("GROQ_API_KEY"))
+                    parsed = _repair_json(raw, os.getenv("GROQ_API_KEY"))
                 except Exception:
                     raise ValueError(f"Crew did not return valid JSON, and repair failed too. Raw output: {raw[:300]}")
+
+            parsed["_token_usage"] = token_usage
+            return parsed
 
         except Exception as exc:
             last_error = exc

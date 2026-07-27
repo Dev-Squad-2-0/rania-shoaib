@@ -60,8 +60,9 @@ def run_verification_node(state: CheckState) -> CheckState:
     try:
         report = run_verification(state)
         elapsed = time.perf_counter() - start
+        token_usage = report.pop("_token_usage", {})
         logger.info(f"Verification completed for '{state['name']}' in {elapsed:.2f}s. "
-                     f"Risk level: {report.get('risk_level')}")
+                     f"Risk level: {report.get('risk_level')}. Token usage: {token_usage}")
         return {"report": report}
     except Exception as exc:
         elapsed = time.perf_counter() - start

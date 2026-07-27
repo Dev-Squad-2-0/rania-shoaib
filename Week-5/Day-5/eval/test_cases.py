@@ -12,8 +12,8 @@ TEST_CASES = [
     {
         "id": 1,
         "label": "Clean match",
-        "candidate": dict(name="Kevin Pacheco", claimed_company="Blake and Sons",
-                           claimed_title="Junior Developer", claimed_institution="registry_lookup",
+        "candidate": dict(name="Alexander Wiley", claimed_company="registry_lookup",
+                           claimed_title="registry_lookup", claimed_institution="registry_lookup",
                            claimed_degree="registry_lookup", consent_given=True),
         "expect_rejection": None,
         "expected_risk_level": "low",
@@ -22,7 +22,7 @@ TEST_CASES = [
     {
         "id": 2,
         "label": "Title mismatch only",
-        "candidate": dict(name="Kevin Pacheco", claimed_company="Blake and Sons",
+        "candidate": dict(name="Alexander Wiley", claimed_company="registry_lookup",
                            claimed_title="Senior Software Architect", claimed_institution="registry_lookup",
                            claimed_degree="registry_lookup", consent_given=True),
         "expect_rejection": None,
@@ -32,7 +32,7 @@ TEST_CASES = [
     {
         "id": 3,
         "label": "Company + title mismatch",
-        "candidate": dict(name="Kevin Pacheco", claimed_company="Totally Different Corp",
+        "candidate": dict(name="Alexander Wiley", claimed_company="Totally Different Corp",
                            claimed_title="Senior Software Architect", claimed_institution="registry_lookup",
                            claimed_degree="registry_lookup", consent_given=True),
         "expect_rejection": None,
@@ -136,6 +136,13 @@ def resolve_registry_lookups(cases):
                     c["claimed_company"] = row[0]
                 if c.get("claimed_title") == "registry_lookup":
                     c["claimed_title"] = row[1]
+            else:
+                raise ValueError(
+                    f"Test case {case['id']} ('{case['label']}'): no employment_records "
+                    f"row found for '{name}' in the current registry.db. This candidate "
+                    f"name doesn't exist in this dataset -- either regenerate registry.db "
+                    f"with this name, or update test_cases.py to use a name that exists."
+                )
         if c.get("claimed_institution") == "registry_lookup" or c.get("claimed_degree") == "registry_lookup":
             cur.execute("SELECT institution, degree FROM education_records WHERE name = ?", (name,))
             row = cur.fetchone()
@@ -144,5 +151,12 @@ def resolve_registry_lookups(cases):
                     c["claimed_institution"] = row[0]
                 if c.get("claimed_degree") == "registry_lookup":
                     c["claimed_degree"] = row[1]
+            else:
+                raise ValueError(
+                    f"Test case {case['id']} ('{case['label']}'): no education_records "
+                    f"row found for '{name}' in the current registry.db. This candidate "
+                    f"name doesn't exist in this dataset -- either regenerate registry.db "
+                    f"with this name, or update test_cases.py to use a name that exists."
+                )
     conn.close()
     return cases
