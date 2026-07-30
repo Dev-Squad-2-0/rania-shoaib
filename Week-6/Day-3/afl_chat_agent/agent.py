@@ -28,7 +28,7 @@ from langchain_core.callbacks.base import BaseCallbackHandler
 from langchain_core.chat_history import InMemoryChatMessageHistory as ChatMessageHistory
 from langchain_core.runnables.history import RunnableWithMessageHistory
 
-from system_prompt import SYSTEM_PROMPT
+from system_prompt import SYSTEM_PROMPT, REFUSAL_EXAMPLES, GROUNDING_EXAMPLES
 from tools import ALL_TOOLS
 
 load_dotenv(find_dotenv())
@@ -57,12 +57,27 @@ class GroundingLogger(BaseCallbackHandler):
 
 
 # ---------------------------------------------------------------------------
-# Prompt: system scope + a placeholder for prior turns (Task 4 memory) +
-# the current human input + the agent_scratchpad LangChain needs to
-# record intermediate tool-calling steps within a single turn.
+# Prompt: system scope + literal few-shot examples + a placeholder for
+# prior turns (Task 4 memory) + the current human input + the
+# agent_scratchpad LangChain needs to record intermediate tool-calling
+# steps within a single turn.
+#
+# The few-shot turns below are new as of the guardrail eval: REFUSAL_EXAMPLES
+# existed in system_prompt.py from the start but were only ever
+# documentation, never actually inserted into the prompt. GROUNDING_EXAMPLES
+# are new, added specifically because two findings (invented headline
+# numbers, arithmetic-derived missing stats) recurred even after adding
+# direct instructions forbidding them in SYSTEM_PROMPT — concrete examples
+# are the escalation past plain instruction-following.
 # ---------------------------------------------------------------------------
+_few_shot_messages = []
+for _ex in REFUSAL_EXAMPLES + GROUNDING_EXAMPLES:
+    _few_shot_messages.append(("human", _ex["user"]))
+    _few_shot_messages.append(("ai", _ex["assistant"]))
+
 prompt = ChatPromptTemplate.from_messages([
     ("system", SYSTEM_PROMPT),
+    *_few_shot_messages,
     MessagesPlaceholder("chat_history", optional=True),
     ("human", "{input}"),
     MessagesPlaceholder("agent_scratchpad"),

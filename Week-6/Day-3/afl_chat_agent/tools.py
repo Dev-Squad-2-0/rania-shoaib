@@ -244,13 +244,79 @@ def get_player_game_stats(player_name: str, year: int, round_number: str) -> dic
         "uncontested_possessions", "fantasy_points", "score", "margin",
         "home_away", "venue",
     ]
+    stats = {c: _native(r[c]) for c in stat_cols}
+
+    # If disposals wasn't recorded but both components were, compute it HERE
+    # rather than leaving the gap for the model to fill. This is the fix for
+    # the recurring "model silently derives disposals = kicks + handballs"
+    # grounding violation found in eval testing: the arithmetic is correct
+    # either way, but doing it in the tool means the number genuinely comes
+    # from a tool call, instead of relying on the model to never take that
+    # shortcut on its own.
+    if stats["disposals"] is None and stats["kicks"] is not None and stats["handballs"] is not None:
+        stats["disposals"] = stats["kicks"] + stats["handballs"]
+        stats["disposals_derived"] = True  # transparency: not a recorded value, computed here
+
     return {
         "player_name": resolved_name,
         "year": year,
         "round": round_number,
         "match_date": str(r["match_date"].date()),
-        "stats": {c: _native(r[c]) for c in stat_cols},
+        "stats": stats,
     }
 
 
-ALL_TOOLS = [get_head_to_head, get_player_season_stats, get_player_game_stats]
+# ---------------------------------------------------------------------------
+# Tool 4: Team stat leaders (closes the gap found when asked "who led
+# Port Adelaide in goals in 2019" — no existing tool could answer this
+# because all three above require the player's name up front)
+# ---------------------------------------------------------------------------
+VALID_LEADER_STATS = {
+    "goals", "kicks", "handballs", "disposals", "marks", "tackles",
+    "clearances", "contested_possessions", "uncontested_possessions",
+    "behinds", "total_fantasy_points",
+}
+
+
+class TeamStatLeadersArgs(BaseModel):
+    team: str = Field(..., description="Team name, e.g. 'Port Adelaide'. Partial names allowed.")
+    year: int = Field(..., description="Season year, e.g. 2019.")
+    stat: str = Field(
+        "goals",
+        description=f"Which stat to rank by. One of: {sorted(VALID_LEADER_STATS)}.",
+    )
+    top_n: int = Field(5, description="How many top players to return. Default 5.")
+
+
+@tool("get_team_stat_leaders", args_schema=TeamStatLeadersArgs)
+def get_team_stat_leaders(team: str, year: int, stat: str = "goals", top_n: int = 5) -> dict:
+    """Get the top players on a team for a given season, ranked by a chosen
+    stat (goals, disposals, tackles, etc.). Use this for questions like
+    'who was Port Adelaide's leading goalkicker in 2019' or 'who led the
+    Bulldogs in disposals in 2022' — anything that asks WHO led a team in a
+    stat, rather than asking about a player you already know by name. Team
+    names can be partial; resolved the same safe way as get_head_to_head
+    (e.g. 'Sydney' will not be confused with 'Greater Western Sydney')."""
+    matches = resolve_team_name(team)
+    if len(matches) != 1:
+        return {"error": f"Could not uniquely resolve team='{team}'. Candidates: {matches}"}
+    team_resolved = matches[0]
+
+    if stat not in VALID_LEADER_STATS:
+        return {"error": f"'{stat}' is not a supported stat. Choose one of: {sorted(VALID_LEADER_STATS)}"}
+
+    season = load_player_season_stats()
+    subset = season[(season["year"] == year) & (season["team"] == team_resolved)]
+    if subset.empty:
+        return {"team": team_resolved, "year": year, "note": "No season data found for this team/year."}
+
+    totals = subset.groupby("player_name")[stat].sum().sort_values(ascending=False).head(top_n)
+    return {
+        "team": team_resolved,
+        "year": year,
+        "stat": stat,
+        "leaders": [{"player_name": name, stat: _native(value)} for name, value in totals.items()],
+    }
+
+
+ALL_TOOLS = [get_head_to_head, get_player_season_stats, get_player_game_stats, get_team_stat_leaders]

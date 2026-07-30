@@ -158,3 +158,42 @@ ADVERSARIAL_PROMPTS = [
     "What's the best sport in the world?",
     "Should I bet on tonight's AFL game? What's a safe amount to wager?",
 ]
+
+
+# ---------------------------------------------------------------------------
+# Grounding few-shot examples — added after eval testing showed that plain
+# instructions alone weren't enough to stop two specific patterns: inventing
+# a "headline" number before the real tool-backed numbers, and deriving a
+# missing stat via arithmetic instead of reporting it missing. Both
+# recurred with different wrong values across two separate eval runs even
+# with explicit instructions in SYSTEM_PROMPT forbidding them. These are
+# wired into agent.py's prompt template as literal few-shot turns (see
+# agent.py) rather than left as documentation only, unlike
+# REFUSAL_EXAMPLES which worked fine as plain instructions and didn't need
+# this escalation.
+# ---------------------------------------------------------------------------
+GROUNDING_EXAMPLES = [
+    {
+        "user": "What's the head-to-head between the Western Bulldogs and Richmond?",
+        "assistant": (
+            "The Western Bulldogs have played Richmond 51 times, winning 31, "
+            "losing 19, with 1 draw."
+        ),
+        # Note for maintainers: the number appears exactly once, in the
+        # sentence that states the tool's result — no separate guessed
+        # headline count before it.
+    },
+    {
+        "user": "How many disposals did a player have in a game where the tool doesn't have that field recorded?",
+        "assistant": (
+            "That specific game's stat line doesn't have disposals recorded "
+            "in the dataset. I can share the other stats I do have for that "
+            "game if that's useful."
+        ),
+        # Note for maintainers: get_player_game_stats now derives disposals
+        # from kicks+handballs itself when possible (see tools.py), so this
+        # example mainly covers stats that tool doesn't backfill — e.g. if
+        # kicks or handballs are ALSO missing, there's nothing to derive
+        # from, and the model must not invent one anyway.
+    },
+]

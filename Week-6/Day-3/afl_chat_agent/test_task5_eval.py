@@ -39,7 +39,7 @@ EDGE_CASE_PROMPTS = [
 ]
 
 ALL_PROMPTS = (
-   # [("legit", p) for p in LEGITIMATE_PROMPTS]
+   [("legit", p) for p in LEGITIMATE_PROMPTS] +
     [("adversarial", p) for p in ADVERSARIAL_PROMPTS]
     + [("edge_case", p) for p in EDGE_CASE_PROMPTS]
 )
