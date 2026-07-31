@@ -18,7 +18,7 @@ import re
 import datetime
 from typing import Optional, Dict, Any, List
 
-from data_loader import resolve_team_name, resolve_player_name
+from data_loader import resolve_team_name, resolve_player_name, load_player_game_stats, load_player_info
 
 
 # ---------------------------------------------------------------------------
@@ -125,25 +125,74 @@ def resolve_player(raw_text: str) -> Dict[str, Any]:
     return {"resolved": unique_names[0]}
 
 
+# ---------------------------------------------------------------------------
+# Generic query vocabulary to strip out during the lowercase fallback below
+# -- words a user's own phrasing contributes ("give me ... stats for ...")
+# that would otherwise get thrown at resolve_player() as noise candidates.
+# This is deliberately conservative (verbs/prepositions/stat-jargon), not
+# an attempt to enumerate every English word, since resolve_player() itself
+# is the real safety net: a stray candidate simply won't match anyone.
+# ---------------------------------------------------------------------------
+_QUERY_STOPWORDS = {
+    "give", "me", "get", "show", "tell", "please", "can", "could", "you",
+    "what", "whats", "were", "was", "is", "are", "his", "her", "he", "she",
+    "it", "they", "them", "their", "the", "a", "an", "of", "for", "and",
+    "in", "on", "at", "to", "from", "stats", "stat", "statline", "season",
+    "seasons", "year", "years", "did", "how", "many", "much", "who",
+    "which", "that", "this", "last", "next", "round", "game", "match",
+    "disposals", "kicks", "marks", "goals", "tackles", "handballs",
+    "points", "s", "i", "mean", "sorry", "meant", "actually", "correction",
+    "scratch", "about", "vs", "versus", "against", "with",
+}
+
+
 def extract_player_mention(query: str, exclude_words: List[str]) -> Optional[str]:
     """Player names aren't cued by a fixed vocabulary the way teams are,
-    so this tries candidate capitalized n-grams (2 words, then 1) against
-    the real player table and keeps the first that resolves uniquely.
-    exclude_words filters out team names already found, so 'Richmond' in
-    'Richmond's Dustin Martin' doesn't get tried as a player name."""
+    so this tries candidate n-grams (2 words, then 1) against the real
+    player table and keeps the first that resolves uniquely. exclude_words
+    filters out team names already found, so 'Richmond' in 'Richmond's
+    Dustin Martin' doesn't get tried as a player name.
+
+    Two passes:
+      1. Capitalized tokens ("Dustin Martin") -- the common case for
+         well-formed queries, and cheap/precise since capitalization
+         alone rules out almost everything that isn't a name.
+      2. Lowercase fallback, only if pass 1 finds nothing -- chat input
+         is very often not properly capitalized ("give me dustin
+         martin's stats for 2017"), so requiring capital case would mean
+         those queries never even attempt a lookup. This pass tokenizes
+         case-insensitively and filters out generic query vocabulary
+         (_QUERY_STOPWORDS) before trying resolve_player(), so it isn't
+         just throwing every word in the sentence at the player table.
+    """
+    exclude_lower = {w.lower() for w in exclude_words}
+
+    def _try(tokens: List[str]) -> Optional[str]:
+        for i in range(len(tokens) - 1):
+            candidate = f"{tokens[i]} {tokens[i + 1]}"
+            result = resolve_player(candidate)
+            if "resolved" in result:
+                return result["resolved"]
+        for t in tokens:
+            result = resolve_player(t)
+            if "resolved" in result:
+                return result["resolved"]
+        return None
+
     raw_tokens = re.findall(r"[A-Z][a-zA-Z'.-]+", query)
-    tokens = [re.sub(r"'s$", "", t) for t in raw_tokens]
-    tokens = [t for t in tokens if t not in exclude_words]
-    for i in range(len(tokens) - 1):
-        candidate = f"{tokens[i]} {tokens[i+1]}"
-        result = resolve_player(candidate)
-        if "resolved" in result:
-            return result["resolved"]
-    for t in tokens:
-        result = resolve_player(t)
-        if "resolved" in result:
-            return result["resolved"]
-    return None
+    cap_tokens = [re.sub(r"'s$", "", t) for t in raw_tokens]
+    cap_tokens = [t for t in cap_tokens if t not in exclude_words]
+    found = _try(cap_tokens)
+    if found:
+        return found
+
+    raw_tokens_ci = re.findall(r"[A-Za-z][a-zA-Z'.-]+", query)
+    ci_tokens = [re.sub(r"'s$", "", t) for t in raw_tokens_ci]
+    ci_tokens = [
+        t for t in ci_tokens
+        if t.lower() not in _QUERY_STOPWORDS and t.lower() not in exclude_lower
+    ]
+    return _try(ci_tokens)
 
 
 # ---------------------------------------------------------------------------
@@ -182,6 +231,60 @@ def resolve_date_phrase(date_phrase: Optional[str], explicit_year: Optional[int]
         return {"date": f"{today.year + 1}-03-01", "resolved_year": today.year + 1, "note": None}
 
     return {"date": None, "resolved_year": None, "note": None}
+
+
+# ---------------------------------------------------------------------------
+# "last round" / "last game" resolution -- deliberately NOT routed to
+# direct_answer_node's LLM call. That node exists for general AFL
+# knowledge no tool covers (history, rules); a specific stat question is
+# exactly what its own SYSTEM_PROMPT forbids it from answering freely
+# ("never estimate, recall from memory, or guess a statistic"). Putting a
+# real stat question in front of it would mean relying on prompt wording
+# alone to stop a hallucinated number, instead of the code-level guarantee
+# every other retrieval path already has.
+#
+# Instead: ground "last round" in the actual most recent game recorded
+# for this player in the dataset, and say so plainly. The dataset caps at
+# a real year (2025 as of writing) -- "last round" typed today could mean
+# "the most recent round of the live season" (which the data doesn't have
+# at all) or "the most recent round on record". There's no way to
+# disambiguate that from the text alone, so rather than guess which one
+# the user meant, this resolves to the one answer that's actually
+# checkable -- the real last recorded game -- and attaches a caveat
+# explaining that's what happened, mirroring resolve_date_phrase's
+# existing "this week" pattern (a real value plus an honest note, not a
+# silent assumption).
+# ---------------------------------------------------------------------------
+def resolve_last_round(player_name: str, year: Optional[int] = None) -> Dict[str, Any]:
+    """Returns {"year": int, "round_number": str, "note": str} for the most
+    recent recorded game for this (already-resolved, exact) player name,
+    optionally constrained to a given year. Returns {"error": str} if no
+    games are on record at all (e.g. name resolved but has zero rows in
+    the game-level table)."""
+    info = load_player_info()
+    id_matches = info[info["player_name"] == player_name]
+    if id_matches.empty:
+        return {"error": f"No game records found for '{player_name}'."}
+    player_id = id_matches.iloc[0]["id"]
+
+    games = load_player_game_stats()
+    rows = games[games["player_id"] == player_id]
+    if year:
+        rows = rows[rows["year"] == year]
+    if rows.empty:
+        return {"error": f"No recorded games found for '{player_name}'" + (f" in {year}." if year else ".")}
+
+    last_row = rows.sort_values("match_date").iloc[-1]
+    resolved_year = int(last_row["year"])
+    resolved_round = str(last_row["round"])
+
+    note = (
+        f"Our data currently runs through the {resolved_year} season, so this is "
+        f"the most recently recorded game for {player_name} on file (round "
+        f"{resolved_round}, {resolved_year}) -- not necessarily their newest "
+        f"real-world game if a later season isn't in the dataset yet."
+    )
+    return {"year": resolved_year, "round_number": resolved_round, "note": note}
 
 
 def _teams_from_history(chat_history) -> List[Dict[str, Any]]:
@@ -250,7 +353,19 @@ def resolve_entities_node(state) -> dict:
 
     if intent in ("prediction", "retrieval") and sub_type in ("match", "head_to_head"):
         team_hits = resolve_team_mentions(query)
-        if len(team_hits) < 2 and re.search(r"\b(they|them|their|it)\b", query, re.IGNORECASE):
+        # LLM-provided hints (router.py's llm_router.py) take priority
+        # over both the regex scan and history carry-over -- if the
+        # extractor already read team_a/team_b (including resolving a
+        # pronoun against chat history itself), trust that over
+        # re-deriving from the raw query text.
+        llm_hits = []
+        for raw in (entities.get("team_a"), entities.get("team_b")):
+            if raw:
+                resolved = resolve_team(raw)
+                llm_hits.append(resolved if "resolved" in resolved else {"error": resolved.get("error", ""), "candidates": resolved.get("candidates", [])})
+        if len(llm_hits) >= 2:
+            team_hits = llm_hits
+        elif len(team_hits) < 2 and re.search(r"\b(they|them|their|it)\b", query, re.IGNORECASE):
             team_hits = _teams_from_history(state.get("chat_history", [])) or team_hits
         if len(team_hits) >= 1:
             entities["team_a_raw"] = team_hits[0]
@@ -281,7 +396,14 @@ def resolve_entities_node(state) -> dict:
     elif intent == "retrieval" and sub_type in ("player_season", "player_game"):
         team_hits = resolve_team_mentions(query)
         exclude = [h.get("resolved", "") for h in team_hits]
-        player = extract_player_mention(query, exclude_words=exclude)
+        player = None
+        llm_player_hint = entities.get("player_name")
+        if llm_player_hint:
+            hint_result = resolve_player(llm_player_hint)
+            if "resolved" in hint_result:
+                player = hint_result["resolved"]
+        if not player:
+            player = extract_player_mention(query, exclude_words=exclude)
         if not player and _PLAYER_PRONOUN_RE.search(query):
             player = _players_from_history(state.get("chat_history", []))
         if player:
@@ -297,7 +419,17 @@ def resolve_entities_node(state) -> dict:
         if ("year" not in entities or entities.get("year") is None) and sub_type == "player_season":
             issues.append({"field": "year", "error": "No season/year specified."})
         if sub_type == "player_game" and "round_number" not in entities:
-            issues.append({"field": "round_number", "error": "No round specified."})
+            if player and entities.get("round_phrase"):
+                last_round_result = resolve_last_round(player, entities.get("year"))
+                if "error" not in last_round_result:
+                    entities["round_number"] = last_round_result["round_number"]
+                    if "year" not in entities or entities.get("year") is None:
+                        entities["year"] = last_round_result["year"]
+                    entities["round_note"] = last_round_result["note"]
+                else:
+                    issues.append({"field": "round_number", "error": last_round_result["error"]})
+            else:
+                issues.append({"field": "round_number", "error": "No round specified."})
 
     date_info = resolve_date_phrase(entities.get("date_phrase"), entities.get("year"))
     entities["resolved_date"] = date_info["date"]

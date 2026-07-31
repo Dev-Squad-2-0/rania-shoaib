@@ -56,7 +56,7 @@ from retrieval_node import retrieval_node
 from prediction_node import prediction_node
 from validation_node import validate_node
 from fallback_nodes import clarify_node, fallback_node
-from direct_and_refusal_nodes import direct_answer_node, refusal_node
+from direct_and_refusal_nodes import direct_answer_node, refusal_node, social_node
 from format_response_node import format_response_node
 from hardening import safe_node
 
@@ -76,6 +76,8 @@ def _after_router(state) -> str:
         return "refusal"
     if intent == "off_topic":
         return "refusal"
+    if intent == "social":
+        return "social"
     if intent == "factual":
         return "direct_answer"
     return "resolve_entities"
@@ -118,12 +120,14 @@ def build_graph():
     g.add_node("fallback", safe_node(fallback_node))
     g.add_node("direct_answer", safe_node(direct_answer_node))
     g.add_node("refusal", safe_node(refusal_node))
+    g.add_node("social", safe_node(social_node))
     g.add_node("format_response", safe_node(format_response_node))
 
     g.set_entry_point("router")
 
     g.add_conditional_edges("router", _after_router, {
         "refusal": "refusal",
+        "social": "social",
         "direct_answer": "direct_answer",
         "resolve_entities": "resolve_entities",
     })
@@ -141,6 +145,7 @@ def build_graph():
     })
 
     g.add_edge("refusal", END)
+    g.add_edge("social", END)
     g.add_edge("clarify", END)
     g.add_edge("fallback", END)
     g.add_edge("direct_answer", "format_response")

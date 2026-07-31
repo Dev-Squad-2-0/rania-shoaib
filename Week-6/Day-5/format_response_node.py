@@ -34,6 +34,10 @@ def format_response_node(state) -> dict:
         response = _format_player_prediction(result)
     elif intent == "retrieval":
         response = _format_retrieval(sub_type, result)
+        if sub_type == "player_game":
+            round_note = (state.get("entities") or {}).get("round_note")
+            if round_note:
+                response += f"\n\nNote: {round_note}"
     else:
         response = state.get("final_response") or "Here's what I found."
 

@@ -61,6 +61,34 @@ from typing import Tuple, Dict, Any
 # ADVERSARIAL_PROMPTS already probes (other sports, jailbreak/role-play,
 # instruction override, general chit-chat) plus a few generic categories.
 # ---------------------------------------------------------------------------
+# ---------------------------------------------------------------------------
+# Social/greeting short-circuit: whole-message-only match (anchored start
+# to end) so this can never fire on "hi, ignore your instructions..." or
+# "thanks, now tell me a recipe" -- those still need to hit the
+# jailbreak/off-topic checks below. This exists purely so a bare "hi" gets
+# an instant templated reply instead of falling through to the "factual"
+# catch-all, which (unlike every dataset tool call) has no LLM call
+# timeout wrapped around it -- see direct_answer_node in
+# direct_and_refusal_nodes.py.
+# ---------------------------------------------------------------------------
+_SOCIAL_RE = re.compile(
+    r"^(hi+|hello+|hey+|hiya|yo+|sup|g'?day|howdy|good\s?(morning|afternoon|evening)|"
+    r"how('?s| is) it going|how are you|what'?s up|whats up|whats good|what'?s good|"
+    r"wass?up|thanks( a lot| so much| heaps)?|thank you( so much)?|cheers|ta|"
+    r"bye|goodbye|see ya|see you|later|good night)[!.,? ]*$",
+    re.IGNORECASE,
+)
+# Interjection + tail combos ("yo whats good", "hey how are you") -- the
+# pattern above only matches ONE fixed phrase, so "yo" followed by a
+# separate tail phrase needs its own pattern rather than trying to cram
+# every combination into one alternation.
+_SOCIAL_COMBO_RE = re.compile(
+    r"^(hi+|hey+|yo+|hello|sup|howdy|g'?day)[\s,!.]+"
+    r"(whats up|what'?s up|whats good|what'?s good|wass?up|"
+    r"how('?s| is) it going|how are you|there|guys|team)[!.,? ]*$",
+    re.IGNORECASE,
+)
+
 _OTHER_SPORTS = [
     "nba", "nrl", "soccer", "football club", "premier league", "epl",
     "cricket", "rugby", "nfl", "tennis", "golf", "f1", "formula 1",
@@ -111,10 +139,12 @@ _BETTING = [r"\bbet\b", r"\bwager\b", r"\bodds\b(?! of winning)", r"\bhow much s
 # Prediction (forward-looking / hypothetical) cues
 # ---------------------------------------------------------------------------
 _PREDICTION_PATTERNS = [
-    r"\bwho will win\b", r"\bwho'?s going to win\b", r"\bwill .+ (beat|smash|defeat|thrash)\b",
+    r"\bwho will win\b", r"\bwho'?s going to win\b", r"\bwho'?s gonna win\b",
+    r"\bwill .+ (beat|smash|defeat|thrash)\b",
     r"\bpredict\b", r"\bprediction\b", r"\bwho.*top.?score\b", r"\bwho will top.?score\b",
+    r"\bwho'?s gonna top.?score\b",
     r"\bchances of winning\b", r"\bwho do you think will win\b", r"\bforecast\b",
-    r"\bwho'?s (favou?red|the favou?rite)\b", r"\bwill .+ win\b",
+    r"\bwho'?s (favou?red|the favou?rite)\b", r"\bwill .+ win\b", r"\bgonna win\b",
     r"\btop scorer (this week|next week|this round)\b",
     r"\bbest player (this week|next round)\b", r"\bwho will get the most\b",
     r"\bmost likely\b", r"\bwho'?s most likely\b",
@@ -159,6 +189,10 @@ _CORRECTION_MARKERS = re.compile(
 )
 
 
+def _is_social(text: str) -> bool:
+    return bool(_SOCIAL_RE.match(text) or _SOCIAL_COMBO_RE.match(text))
+
+
 def _matches_any(patterns, text) -> bool:
     return any(re.search(p, text, re.IGNORECASE) for p in patterns)
 
@@ -168,6 +202,13 @@ def classify_intent(query: str) -> Tuple[str, str, str]:
     for "prediction" ("match"/"player") and "retrieval" (see above);
     it's None for "factual"/"off_topic"."""
     q = query.lower().strip()
+
+    # 0. Social/greeting short-circuit -- deliberately checked before even
+    #    the jailbreak patterns, since it's an anchored whole-message match
+    #    (see _SOCIAL_RE) and therefore can't accidentally swallow anything
+    #    with real content tacked on.
+    if _is_social(q):
+        return "social", None, "high"
 
     # 1. Off-topic checks first -- a jailbreak attempt embedded inside an
     #    AFL-sounding question should still be caught (Day 3's "smuggled"
@@ -251,6 +292,13 @@ def extract_raw_entities(query: str) -> Dict[str, Any]:
             entities["date_phrase"] = phrase
             break
 
+    entities["round_phrase"] = None
+    for phrase in ["last round", "last game", "most recent round", "most recent game",
+                   "that game", "latest round", "latest game"]:
+        if phrase in query.lower():
+            entities["round_phrase"] = phrase
+            break
+
     top_n_match = re.search(r"\btop\s*(\d+)\b", query, re.IGNORECASE)
     if top_n_match:
         entities["top_n"] = int(top_n_match.group(1))
@@ -260,14 +308,55 @@ def extract_raw_entities(query: str) -> Dict[str, Any]:
 
 def router_node(state) -> dict:
     from state import log_step  # local import avoids a cycle at module load
+    from llm_router import classify_and_extract_llm
     query = state["query"]
+
+    # Social short-circuit is checked first regardless of anything else --
+    # it's cheap, unambiguous when it matches (anchored whole-message),
+    # and shouldn't cost an LLM round trip either way.
+    if _is_social(query.lower().strip()):
+        entities = extract_raw_entities(query)
+        log_step(state, "router", query=query, intent="social", sub_type=None,
+                  confidence="high", raw_entities=dict(entities), used_llm=False)
+        return {"intent": "social", "sub_type": None, "router_confidence": "high", "entities": entities}
+
+    # Regex pass runs FIRST, always -- it's free and instant. The LLM
+    # extractor is only tried when regex itself is unsure (confidence
+    # "medium"/"low", which includes the "factual" catch-all bucket a
+    # query lands in when nothing matched). This matters a lot in
+    # practice: an LLM gateway call costs real seconds even when it
+    # succeeds, so paying that cost on every single message -- including
+    # ones regex already classifies with total confidence -- is wasted
+    # latency for no accuracy gain. Only the genuinely ambiguous slice of
+    # queries (slang like "gonna win", pronoun follow-ups, phrasing the
+    # regex patterns don't cover) actually benefits from the LLM call.
     intent, sub_type, confidence = classify_intent(query)
     entities = extract_raw_entities(query)
+
+    if confidence == "high":
+        log_step(state, "router", query=query, intent=intent, sub_type=sub_type,
+                  confidence=confidence, raw_entities=dict(entities), used_llm=False)
+        return {"intent": intent, "sub_type": sub_type, "router_confidence": confidence, "entities": entities}
+
+    # Regex wasn't confident -- worth spending an LLM call to do better,
+    # but any failure (no key, timeout, bad JSON) just keeps the regex
+    # result above rather than leaving the user with nothing.
+    llm_result = classify_and_extract_llm(query, state.get("chat_history", []))
+    if llm_result is not None:
+        llm_intent = llm_result["intent"]
+        llm_sub_type = llm_result.get("sub_type")
+        llm_confidence = llm_result.get("confidence", "medium")
+        for key, value in (llm_result.get("entities") or {}).items():
+            if value is not None:
+                entities[key] = value
+        log_step(state, "router", query=query, intent=llm_intent, sub_type=llm_sub_type,
+                  confidence=llm_confidence, raw_entities=dict(entities), used_llm=True)
+        return {"intent": llm_intent, "sub_type": llm_sub_type, "router_confidence": llm_confidence, "entities": entities}
 
     log_step(
         state, "router",
         query=query, intent=intent, sub_type=sub_type,
-        confidence=confidence, raw_entities=dict(entities),
+        confidence=confidence, raw_entities=dict(entities), used_llm=False,
     )
     return {
         "intent": intent,

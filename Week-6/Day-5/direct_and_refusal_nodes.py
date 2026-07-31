@@ -18,13 +18,57 @@ Two nodes for the branches that never touch a prediction/retrieval tool:
 """
 
 import os
+import random
+import re
 from dotenv import load_dotenv, find_dotenv
 load_dotenv(find_dotenv())
+
+from hardening import run_with_timeout, ToolTimeoutError
 
 try:
     from system_prompt import SYSTEM_PROMPT
 except ImportError:
     SYSTEM_PROMPT = ""
+
+
+# ---------------------------------------------------------------------------
+# social_node: handles the router's "social" intent (see router.py's
+# _SOCIAL_RE) -- greetings, thanks, farewells. Templated, not an LLM call,
+# on purpose: there's nothing here worth spending gateway latency or
+# tokens on, and a bare "hi" shouldn't have to wait behind the same
+# unbounded LLM call direct_answer_node makes for real factual questions.
+# A short rotation (rather than one fixed string) is enough to keep it
+# from feeling robotic without needing a model in the loop.
+# ---------------------------------------------------------------------------
+_SOCIAL_REPLIES = [
+    "Hey! Ask me anything about AFL -- stats, head-to-head records, or a match prediction.",
+    "Hi there! I'm your AFL assistant -- happy to look up player stats, team records, or predict a matchup.",
+    "Hello! What AFL question can I help with -- a player's stats, a head-to-head, or a prediction?",
+]
+_SOCIAL_THANKS_REPLIES = [
+    "Anytime! Let me know if there's another AFL stat or matchup you want to check.",
+    "You're welcome -- happy to help with more AFL stats or predictions whenever.",
+]
+_SOCIAL_FAREWELL_REPLIES = [
+    "See ya! Come back anytime for more AFL stats or predictions.",
+    "Bye for now -- happy to help again whenever.",
+]
+
+_THANKS_RE = re.compile(r"\b(thanks|thank you|cheers|ta)\b", re.IGNORECASE)
+_FAREWELL_RE = re.compile(r"\b(bye|goodbye|see ya|see you|later|good night)\b", re.IGNORECASE)
+
+
+def social_node(state) -> dict:
+    from state import log_step
+    query = state["query"]
+    if _FAREWELL_RE.search(query):
+        response = random.choice(_SOCIAL_FAREWELL_REPLIES)
+    elif _THANKS_RE.search(query):
+        response = random.choice(_SOCIAL_THANKS_REPLIES)
+    else:
+        response = random.choice(_SOCIAL_REPLIES)
+    log_step(state, "social", query=query, message=response)
+    return {"final_response": response}
 
 
 def direct_answer_node(state) -> dict:
@@ -53,8 +97,38 @@ def direct_answer_node(state) -> dict:
         api_key=gateway_key,
         model=os.environ.get("AFL_AGENT_MODEL", "smart"),
         temperature=0,
+        # Belt-and-suspenders: the client's own request timeout, in
+        # addition to the wall-clock wrapper below. Neither alone is
+        # enough -- a hung TCP connection needs the client-level timeout,
+        # a slow-but-connected/streaming response needs the wrapper.
+        timeout=8.0,
     )
-    result = llm.invoke([("system", SYSTEM_PROMPT), ("human", query)])
+
+    def _call():
+        return llm.invoke([("system", SYSTEM_PROMPT), ("human", query)])
+
+    try:
+        # Task 1's hardening.py wraps every dataset tool call in a hard
+        # timeout (see retrieval_node.py/prediction_node.py); this LLM
+        # call was the one path that never got the same guarantee, which
+        # is exactly what let a slow/hung gateway block a whole turn
+        # indefinitely (e.g. a bare "hi" misrouted here -- now fixed
+        # separately by router.py's social short-circuit, but this call
+        # still needs its own ceiling for genuine factual questions).
+        result = run_with_timeout(_call, timeout=10.0)
+    except ToolTimeoutError:
+        log_step(state, "direct_answer", query=query, used_llm=True, timed_out=True)
+        return {"final_response": (
+            "That's taking longer than expected to answer, so I've stopped "
+            "rather than leave you waiting. Please try again in a moment."
+        )}
+    except Exception as e:
+        log_step(state, "direct_answer", query=query, used_llm=True, error=f"{type(e).__name__}: {e}")
+        return {"final_response": (
+            "I couldn't reach the model for that general AFL question just now. "
+            "Please try again in a moment."
+        )}
+
     log_step(state, "direct_answer", query=query, used_llm=True)
     return {"final_response": result.content}
 

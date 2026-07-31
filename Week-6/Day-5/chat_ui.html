@@ -1,222 +1,441 @@
 <!DOCTYPE html>
+<!--
+  static/index.html
+  ===================
+  "Boundary" — AFL Assistant chat UI, rebuilt to match DESIGN.md's design
+  tokens (Navy/Gold "pro-league" palette, Montserrat headlines + Inter
+  body, 12px chat-bubble radius, tonal-layer elevation) and the provided
+  reference screenshot (header with mascot + wordmark + "New chat", intro
+  card with capability bullets, factual/retrieval tags + response time
+  under bot replies, "Thinking" indicator, pill-shaped input bar).
+-->
 <html lang="en">
 <head>
 <meta charset="UTF-8">
-<title>AFL Assistant</title>
+<title>Boundary — AFL Assistant</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Montserrat:wght@600;700;800&family=Inter:wght@400;500;600&display=swap" rel="stylesheet">
 <style>
   :root {
-    --afl-navy: #142a4f;
-    --afl-gold: #c9a24b;
-    --bg: #f5f6f8;
-    --bubble-user: #142a4f;
-    --bubble-bot: #ffffff;
+    /* --- Design tokens, pulled directly from DESIGN.md --- */
+    --background: #f8f9fb;
+    --surface-container-lowest: #ffffff;
+    --surface-container-low: #f3f4f6;
+    --surface-container: #edeef0;
+    --on-surface: #191c1e;
+    --on-surface-variant: #44474e;
+    --outline-variant: #c5c6cf;
+
+    --primary: #001536;
+    --on-primary: #ffffff;
+    --primary-container: #142a4f;
+    --on-primary-container: #7e92bd;
+
+    --secondary: #795902;
+    --on-secondary: #ffffff;
+    --secondary-container: #fdd275;
+    --on-secondary-container: #775800;
+
+    --error: #ba1a1a;
+
+    --font-display: 'Montserrat', sans-serif;
+    --font-body: 'Inter', sans-serif;
+
+    --radius-standard: 8px;
+    --radius-large: 12px;
+    --radius-full: 9999px;
+
+    --space-xs: 4px;
+    --space-sm: 8px;
+    --space-md: 16px;
+    --space-lg: 24px;
   }
+
   * { box-sizing: border-box; }
   body {
     margin: 0;
-    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
-    background: var(--bg);
-    display: flex;
-    justify-content: center;
-    height: 100vh;
+    font-family: var(--font-body);
+    background: var(--background);
+    color: var(--on-surface);
+    display: flex; flex-direction: column; height: 100vh;
   }
-  #app {
-    width: 100%;
-    max-width: 720px;
-    display: flex;
-    flex-direction: column;
-    height: 100vh;
-    background: #fff;
-    box-shadow: 0 0 24px rgba(0,0,0,0.06);
+
+  /* Centered column, max 768px, per DESIGN.md's chat-layout rule */
+  .app-shell {
+    max-width: 768px; margin: 0 auto; width: 100%;
+    display: flex; flex-direction: column; height: 100%;
+    background: var(--surface-container-lowest);
+    box-shadow: 0 4px 24px rgba(0, 21, 54, 0.06);
   }
+
+  /* --- Header --- */
   header {
-    background: var(--afl-navy);
-    color: #fff;
-    padding: 16px 20px;
-    display: flex;
-    align-items: center;
-    justify-content: space-between;
+    background: var(--primary);
+    color: var(--on-primary);
+    padding: 14px var(--space-md);
+    display: flex; align-items: center; justify-content: space-between;
+    flex-shrink: 0;
   }
-  header h1 { font-size: 16px; margin: 0; font-weight: 600; letter-spacing: 0.02em; }
-  header .sub { font-size: 12px; color: var(--afl-gold); margin-top: 2px; }
-  header button {
-    background: transparent;
-    border: 1px solid rgba(255,255,255,0.4);
-    color: #fff;
-    border-radius: 6px;
-    padding: 6px 10px;
-    font-size: 12px;
-    cursor: pointer;
+  .brand { display: flex; align-items: center; gap: 12px; }
+  .mascot-badge {
+    width: 52px; height: 52px; border-radius: var(--radius-full);
+    background: var(--primary);
+    display: flex; align-items: center; justify-content: center;
+    flex-shrink: 0; overflow: hidden;
   }
-  #messages {
-    flex: 1;
-    overflow-y: auto;
-    padding: 16px;
+  .mascot-badge img { width: 150%; height: 150%; object-fit: cover; }
+  .brand-text h1 {
+    font-family: var(--font-display); font-weight: 800; font-size: 17px;
+    letter-spacing: 0.02em; margin: 0; line-height: 1.15;
+  }
+  .brand-text .subtitle {
+    font-size: 10.5px; font-weight: 600; letter-spacing: 0.08em;
+    text-transform: uppercase; color: var(--on-primary-container);
+    margin-top: 2px;
+  }
+  #newChatBtn {
+    background: transparent; border: 1px solid rgba(255,255,255,0.35);
+    color: var(--on-primary); padding: 7px 14px; border-radius: var(--radius-standard);
+    cursor: pointer; font-family: var(--font-body); font-weight: 600; font-size: 12.5px;
+    transition: background 0.15s ease;
+  }
+  #newChatBtn:hover { background: rgba(255,255,255,0.12); }
+
+  /* --- Chat log --- */
+  #chatLog {
+    flex: 1; overflow-y: auto; padding: var(--space-md);
+    display: flex; flex-direction: column; gap: 14px;
+    background: var(--background);
+  }
+
+  /* Intro card, matches the cream/gold-tinted welcome card in the reference */
+  .intro-card {
+    background: linear-gradient(135deg, #fdf7ea 0%, #fdf1d9 100%);
+    border: 1px solid #f3e2b8;
+    border-radius: var(--radius-large);
+    padding: var(--space-md);
+    font-size: 14px; line-height: 1.55;
+  }
+  .intro-card strong { font-family: var(--font-display); font-weight: 700; font-size: 15px; }
+  .intro-card ul { margin: 10px 0 0; padding-left: 0; list-style: none; }
+  .intro-card li { display: flex; align-items: center; gap: 8px; margin-top: 6px; color: var(--on-surface-variant); }
+  .intro-card li .dot { color: var(--secondary); font-weight: 700; }
+
+  .msg-row { display: flex; flex-direction: column; max-width: 82%; }
+  .msg-row.user { align-self: flex-end; align-items: flex-end; }
+  .msg-row.bot { align-self: flex-start; align-items: flex-start; }
+
+  .msg {
+    padding: 11px 15px; border-radius: var(--radius-large); line-height: 1.5;
+    font-size: 14.5px; white-space: pre-wrap; word-break: break-word;
+    width: fit-content; max-width: 100%;
+  }
+  .msg.user {
+    background: var(--primary); color: var(--on-primary);
+    border-bottom-right-radius: 3px;
+  }
+  .msg.bot {
+    background: var(--on-primary); color: var(--on-surface);
+    border: 1px solid #e3e4e8;
+    border-bottom-left-radius: 3px;
+    box-shadow: 0 4px 12px rgba(0, 21, 54, 0.05);
+    display: inline-flex; gap: 10px; align-items: flex-start;
+    width: fit-content; max-width: 100%;
+  }
+  .bot-avatar {
+    width: 36px; height: 36px; border-radius: var(--radius-full);
+    background: var(--surface-container-lowest); flex-shrink: 0; overflow: hidden;
+    display: flex; align-items: center; justify-content: center; margin-top: 1px;
+    border: 1px solid #e3e4e8;
+  }
+  .bot-avatar img { width: 110%; height: 110%; object-fit: contain; }
+  .bot-content {
+    flex: 0 1 auto;
+    min-width: 0;
     display: flex;
     flex-direction: column;
-    gap: 10px;
+    align-items: flex-start;
   }
-  .row { display: flex; }
-  .row.user { justify-content: flex-end; }
-  .bubble {
-    max-width: 78%;
-    padding: 10px 14px;
-    border-radius: 14px;
-    font-size: 14px;
-    line-height: 1.45;
-    white-space: pre-wrap;
+
+  .meta-row { display: flex; align-items: center; gap: 8px; margin-top: 6px; flex-wrap: wrap; }
+  .tag {
+    font-family: var(--font-body); font-weight: 600; font-size: 11px;
+    padding: 2px 9px; border-radius: 999px; display: inline-flex; align-items: center; gap: 4px;
   }
-  .row.user .bubble { background: var(--bubble-user); color: #fff; border-bottom-right-radius: 4px; }
-  .row.bot .bubble { background: var(--bubble-bot); border: 1px solid #e5e7eb; border-bottom-left-radius: 4px; }
-  .meta {
-    font-size: 11px;
-    color: #9aa1ab;
-    margin-top: 4px;
-    padding-left: 2px;
+  .tag.factual { background: #e7edfb; color: #2f4d8e; }
+  .tag.retrieval { background: #e4f3e9; color: #2c7a4b; }
+  .tag.prediction { background: var(--secondary-container); color: var(--on-secondary-container); }
+  .tag.off_topic { background: #fbe4e4; color: #9a2c2c; }
+  .tag.error, .tag.fallback { background: #f3f0e0; color: #7a6a1a; }
+  .latency-note { font-size: 11px; color: var(--on-surface-variant); }
+
+  .typing-row { display: inline-flex; gap: 10px; align-items: center; width: fit-content; }
+  .typing { display: inline-flex; gap: 3px; }
+  .typing span {
+    width: 6px; height: 6px; border-radius: 50%; background: var(--outline-variant);
+    animation: bounce 1.2s infinite ease-in-out;
   }
-  .badge {
-    display: inline-block;
-    font-size: 10px;
-    text-transform: uppercase;
-    letter-spacing: 0.03em;
-    padding: 2px 6px;
-    border-radius: 10px;
-    margin-right: 6px;
-    background: #eef1f5;
-    color: #46505e;
+  .typing span:nth-child(2) { animation-delay: 0.15s; }
+  .typing span:nth-child(3) { animation-delay: 0.3s; }
+  @keyframes bounce { 0%, 80%, 100% { transform: translateY(0); } 40% { transform: translateY(-4px); } }
+  .thinking-label { font-size: 12.5px; font-style: italic; color: var(--on-surface-variant); }
+
+  /* --- Example chips --- */
+  .examples { display: flex; flex-wrap: wrap; gap: 7px; padding: 0 var(--space-md) var(--space-sm); background: var(--background); }
+  .example-chip {
+    background: var(--surface-container-lowest); border: 1px solid var(--outline-variant);
+    border-radius: var(--radius-full); padding: 6px 13px; font-size: 12.5px;
+    font-family: var(--font-body); font-weight: 500; cursor: pointer; color: var(--primary);
+    transition: background 0.15s ease, border-color 0.15s ease;
   }
-  .badge.prediction { background: #fdf3e0; color: #8a6416; }
-  .badge.retrieval { background: #e6f0fb; color: #1e4f8a; }
-  .badge.off_topic { background: #fbe9e9; color: #9a3030; }
-  .badge.factual { background: #eaf6ea; color: #2f6b34; }
-  #inputbar {
-    display: flex;
-    gap: 8px;
-    padding: 12px 16px;
-    border-top: 1px solid #eee;
+  .example-chip:hover { background: var(--surface-container-low); border-color: var(--primary); }
+
+  /* --- Input bar --- */
+  #inputBar {
+    display: flex; gap: 10px; padding: 14px var(--space-md);
+    background: var(--surface-container-lowest); border-top: 1px solid var(--outline-variant);
+    flex-shrink: 0;
   }
-  #inputbar input {
-    flex: 1;
-    padding: 10px 14px;
-    border-radius: 20px;
-    border: 1px solid #d8dce2;
-    font-size: 14px;
-    outline: none;
+  #msgInput {
+    flex: 1; padding: 12px 18px; border-radius: var(--radius-full);
+    border: 1px solid var(--outline-variant); font-size: 14px; font-family: var(--font-body);
+    outline: none; transition: border-color 0.15s ease;
+    background: var(--surface-container-low);
   }
-  #inputbar input:focus { border-color: var(--afl-navy); }
-  #inputbar button {
-    background: var(--afl-navy);
-    color: #fff;
-    border: none;
-    border-radius: 20px;
-    padding: 10px 18px;
-    font-size: 14px;
-    cursor: pointer;
+  #msgInput:focus { border-color: var(--primary); background: var(--surface-container-lowest); }
+  #sendBtn {
+    background: var(--primary); color: var(--on-primary); border: none;
+    width: 44px; height: 44px; border-radius: var(--radius-full); cursor: pointer;
+    display: flex; align-items: center; justify-content: center; flex-shrink: 0;
+    transition: background 0.15s ease;
   }
-  #inputbar button:disabled { opacity: 0.5; cursor: default; }
-  .typing { font-size: 13px; color: #9aa1ab; padding-left: 2px; }
+  #sendBtn:hover:not(:disabled) { background: var(--primary-container); }
+  #sendBtn:disabled { opacity: 0.5; cursor: default; }
+  #sendBtn svg { width: 18px; height: 18px; }
+  #interruptBtn {
+    background: #ffffff; color: var(--error); border: 1px solid #f0b7b7;
+    width: 44px; height: 44px; border-radius: var(--radius-full); cursor: pointer;
+    display: flex; align-items: center; justify-content: center; flex-shrink: 0;
+    transition: background 0.15s ease, border-color 0.15s ease, color 0.15s ease;
+  }
+  #interruptBtn:hover:not(:disabled) {
+    background: #fdf3f3;
+    border-color: #e58d8d;
+    color: #a61d1d;
+  }
+  #interruptBtn:disabled { opacity: 0.45; cursor: default; }
+  #interruptBtn svg { width: 16px; height: 16px; }
 </style>
 </head>
 <body>
-<div id="app">
+
+<div class="app-shell">
+
   <header>
-    <div>
-      <h1>AFL Assistant</h1>
-      <div class="sub">stats &middot; predictions &middot; AFL only</div>
+    <div class="brand">
+      <div class="mascot-badge"><img src="boundary_mascot.PNG" alt="Boundary mascot" /></div>
+      <div class="brand-text">
+        <h1>BOUNDARY</h1>
+        <div class="subtitle">AFL Assistant</div>
+      </div>
     </div>
-    <button onclick="resetChat()">New chat</button>
+    <button id="newChatBtn" onclick="startNewConversation()">New chat</button>
   </header>
-  <div id="messages"></div>
-  <div id="inputbar">
-    <input id="msgInput" type="text" placeholder="Ask about a stat, a matchup, or a prediction..."
-           onkeydown="if(event.key==='Enter') sendMessage()">
-    <button id="sendBtn" onclick="sendMessage()">Send</button>
+
+  <div id="chatLog"></div>
+
+  <div class="examples" id="exampleChips">
+    <div class="example-chip" onclick="sendExample(this)">What are the head-to-head stats for Collingwood vs Richmond?</div>
+    <div class="example-chip" onclick="sendExample(this)">Will the Pies beat the Cats this week?</div>
+    <div class="example-chip" onclick="sendExample(this)">Who led Port Adelaide in goals in 2019?</div>
   </div>
+
+  <div id="inputBar">
+    <input id="msgInput" type="text" placeholder="Ask Boundary anything about AFL..." autocomplete="off" />
+    <button id="interruptBtn" onclick="interruptMessage()" aria-label="Stop response" disabled>
+      <svg viewBox="0 0 24 24" fill="currentColor" xmlns="http://www.w3.org/2000/svg">
+        <path d="M7 7H17V17H7V7Z" />
+      </svg>
+    </button>
+    <button id="sendBtn" onclick="sendMessage()" aria-label="Send">
+      <svg viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
+        <path d="M3 11L21 3L13 21L11 13L3 11Z" fill="currentColor"/>
+      </svg>
+    </button>
+  </div>
+
 </div>
 
 <script>
-// Point this at wherever api.py is actually running.
-const API_BASE = "http://localhost:8000";
-
+const API_BASE = window.location.protocol === "file:"
+  ? "http://127.0.0.1:8000"
+  : "";
 let conversationId = null;
+let activeRequestController = null;
 
-const messagesEl = document.getElementById("messages");
-const inputEl = document.getElementById("msgInput");
-const sendBtn = document.getElementById("sendBtn");
-
-function addBubble(role, text, meta) {
-  const row = document.createElement("div");
-  row.className = "row " + (role === "user" ? "user" : "bot");
-  const bubble = document.createElement("div");
-  bubble.className = "bubble";
-  bubble.textContent = text;
-  row.appendChild(bubble);
-  messagesEl.appendChild(row);
-
-  if (meta) {
-    const metaEl = document.createElement("div");
-    metaEl.className = "meta";
-    const badgeClass = (meta.intent || "").toLowerCase();
-    metaEl.innerHTML =
-      `<span class="badge ${badgeClass}">${meta.intent || "?"}${meta.sub_type ? " / " + meta.sub_type : ""}</span>` +
-      `${meta.latency_ms ? meta.latency_ms.toFixed(0) + " ms" : ""}`;
-    messagesEl.appendChild(metaEl);
+function startNewConversation() {
+  if (conversationId) {
+    fetch(`${API_BASE}/chat/${conversationId}`, { method: "DELETE" }).catch(() => {});
   }
-  messagesEl.scrollTop = messagesEl.scrollHeight;
+  conversationId = null;
+  const log = document.getElementById("chatLog");
+  log.innerHTML = `
+    <div class="intro-card">
+      <strong>Hi, I'm Boundary!</strong>
+      <div>I can help you with:</div>
+      <ul>
+        <li><span class="dot">◈</span> AFL Stat Lookups</li>
+        <li><span class="dot">◈</span> Match Predictions (Probabilities)</li>
+        <li><span class="dot">◈</span> AFL History &amp; Rules</li>
+      </ul>
+    </div>
+  `;
 }
 
-function addTyping() {
-  const el = document.createElement("div");
-  el.className = "typing";
-  el.id = "typingIndicator";
-  el.textContent = "Thinking...";
-  messagesEl.appendChild(el);
-  messagesEl.scrollTop = messagesEl.scrollHeight;
+function scrollToBottom() {
+  const log = document.getElementById("chatLog");
+  log.scrollTop = log.scrollHeight;
 }
 
-function removeTyping() {
-  const el = document.getElementById("typingIndicator");
+function addUserMessage(text) {
+  const log = document.getElementById("chatLog");
+  const row = document.createElement("div");
+  row.className = "msg-row user";
+  row.innerHTML = `<div class="msg user"></div>`;
+  row.querySelector(".msg").textContent = text;
+  log.appendChild(row);
+  scrollToBottom();
+}
+
+const TAG_LABELS = {
+  factual: "Factual",
+  retrieval: "Retrieval",
+  prediction: "Prediction",
+  off_topic: "Off-topic",
+  error: "Error",
+  fallback: "Unsupported",
+};
+
+function addBotMessage(text, meta) {
+  const log = document.getElementById("chatLog");
+  const row = document.createElement("div");
+  row.className = "msg-row bot";
+
+  let metaHtml = "";
+  if (meta) {
+    const tagKey = meta.intent === "off_topic" ? "off_topic"
+      : (meta.validationStatus && meta.validationStatus !== "ok") ? meta.validationStatus
+      : meta.intent;
+    const tagLabel = TAG_LABELS[tagKey] || tagKey || "";
+    metaHtml = `
+      <div class="meta-row">
+        ${tagLabel ? `<span class="tag ${tagKey}">${tagLabel}</span>` : ""}
+        <span class="latency-note">Response time: ${meta.latencyMs}ms</span>
+      </div>`;
+  }
+
+  row.innerHTML = `
+    <div class="msg bot">
+      <div class="bot-avatar"><img src="boundary_mascot.PNG" alt="Boundary mascot" /></div>
+      <div class="bot-content">
+        <div class="bot-text"></div>
+        ${metaHtml}
+      </div>
+    </div>`;
+  row.querySelector(".bot-text").textContent = text;
+  log.appendChild(row);
+  scrollToBottom();
+}
+
+function addTypingIndicator() {
+  const log = document.getElementById("chatLog");
+  const row = document.createElement("div");
+  row.className = "msg-row bot";
+  row.id = "typingRow";
+  row.innerHTML = `
+    <div class="msg bot">
+      <div class="bot-avatar"><img src="boundary_mascot.PNG" alt="Boundary mascot" /></div>
+      <div class="typing-row">
+        <span class="thinking-label">Thinking</span>
+        <div class="typing"><span></span><span></span><span></span></div>
+      </div>
+    </div>`;
+  log.appendChild(row);
+  scrollToBottom();
+}
+
+function removeTypingIndicator() {
+  const el = document.getElementById("typingRow");
   if (el) el.remove();
 }
 
+function setRequestControls(isPending) {
+  document.getElementById("sendBtn").disabled = isPending;
+  document.getElementById("interruptBtn").disabled = !isPending;
+}
+
+function interruptMessage() {
+  if (activeRequestController) {
+    activeRequestController.abort();
+  }
+  removeTypingIndicator();
+  activeRequestController = null;
+  setRequestControls(false);
+  document.getElementById("msgInput").focus();
+}
+
 async function sendMessage() {
-  const text = inputEl.value.trim();
+  const input = document.getElementById("msgInput");
+  const text = input.value.trim();
   if (!text) return;
-  inputEl.value = "";
-  sendBtn.disabled = true;
-  addBubble("user", text);
-  addTyping();
+
+  input.value = "";
+  activeRequestController = new AbortController();
+  setRequestControls(true);
+  addUserMessage(text);
+  addTypingIndicator();
 
   try {
-    const res = await fetch(`${API_BASE}/chat`, {
+    const resp = await fetch(`${API_BASE}/chat`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
+      signal: activeRequestController.signal,
       body: JSON.stringify({ message: text, conversation_id: conversationId }),
     });
-    if (!res.ok) throw new Error(`HTTP ${res.status}`);
-    const data = await res.json();
+    if (!resp.ok) throw new Error(`Server returned ${resp.status}`);
+    const data = await resp.json();
     conversationId = data.conversation_id;
-    removeTyping();
-    addBubble("bot", data.response, { intent: data.intent, sub_type: data.sub_type, latency_ms: data.latency_ms });
+
+    removeTypingIndicator();
+    addBotMessage(data.response, {
+      intent: data.intent,
+      validationStatus: data.validation_status,
+      latencyMs: data.latency_ms,
+    });
   } catch (err) {
-    removeTyping();
-    addBubble("bot", "Something went wrong reaching the assistant: " + err.message);
+    if (err && err.name === "AbortError") {
+      return;
+    }
+    removeTypingIndicator();
+    addBotMessage("Sorry, something went wrong reaching the assistant. Is the API server running?", null);
   } finally {
-    sendBtn.disabled = false;
-    inputEl.focus();
+    activeRequestController = null;
+    setRequestControls(false);
+    input.focus();
   }
 }
 
-async function resetChat() {
-  if (conversationId) {
-    try { await fetch(`${API_BASE}/chat/${conversationId}`, { method: "DELETE" }); } catch (e) {}
-  }
-  conversationId = null;
-  messagesEl.innerHTML = "";
-  addBubble("bot", "New conversation started. Ask me about an AFL stat, matchup, or prediction.");
+function sendExample(el) {
+  document.getElementById("msgInput").value = el.textContent;
+  sendMessage();
 }
 
-resetChat();
+document.getElementById("msgInput").addEventListener("keydown", (e) => {
+  if (e.key === "Enter") sendMessage();
+});
+
+startNewConversation();
 </script>
+
 </body>
 </html>

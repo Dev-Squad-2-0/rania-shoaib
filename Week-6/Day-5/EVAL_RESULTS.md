@@ -14,8 +14,8 @@ python3 test_eval_suite.py
 | A: Factual/Retrieval Accuracy | 7 | 7 | 100% |
 | B: Prediction Sanity | 7 | 7 | 100% |
 | C: Scope Guardrails | 6 | 7 | 86% |
-| D: Multi-turn Coherence | 4 | 7 | 57% |
-| **Overall** | **24** | **28** | **86%** |
+| D: Multi-turn Coherence | 6 | 7 | 86% |
+| **Overall** | **26** | **28** | **93%** |
 
 Full case-by-case output: `eval_run_clean.txt` (regenerate with the
 command above -- it's a real transcript, not hand-edited).
@@ -72,46 +72,44 @@ them), which is too permissive a default. This is a real, if narrower,
 version of the same category of gap the C5 fix (Task 1) already closed
 once for jailbreak phrasing -- worth its own follow-up patch to
 `_GENERIC_OFFTOPIC` (e.g. adding a pattern for "how does X work" /
-"explain X" where X isn't AFL-related), not fixed here since Category D
-is the larger, more clear-cut gap (below).
+"explain X" where X isn't AFL-related). This was left unfixed for this
+round since Category D had the larger, more clear-cut gap at the time;
+now that D's fix has landed, C and D are tied at 86% and C is the
+remaining open item, addressed with the same explicit pattern-list
+approach used everywhere else in `router.py`.
 
-## Category D: Multi-turn Coherence (4/7) -- weakest category
+## Category D: Multi-turn Coherence (6/7, up from 4/7)
 
-**Root cause, confirmed by reading `resolver.py`, not guessed:**
-`resolver.py` has `_teams_from_history(chat_history)` (line 187) which
-lets "they"/"them" resolve against the teams mentioned in a prior turn --
-this is why D1/D2/D6 pass. There is **no equivalent function for players
-or years**. So:
+**Fix applied since the first run:** `resolver.py` now has
+`_players_from_history(chat_history)` and `_year_from_history(chat_history)`,
+mirroring the existing `_teams_from_history` pattern exactly, as proposed
+below. This closed both previously-failing cases that were caused by
+missing player/year carry-over:
 
-- **D5 failed**: "And how did he do in round 10 that year?" (following a
-  turn that established Bontempelli + 2022) -- "he" and "that year" have
-  no history-lookup path to resolve against, so entity resolution finds
-  nothing and correctly (but unhelpfully) falls through to a clarifying
-  question instead of reusing the established player/year.
-- **D7 failed**: same root cause, in a conversation that also included an
-  off-topic interruption turn beforehand -- confirms the gap is about
-  missing player/year carry-over specifically, not about off-topic turns
-  corrupting state (D6 already showed off-topic interruptions are handled
-  cleanly).
-- **D3** is a harder, different case ("what about against Collingwood
-  *instead*?" -- swapping one team while keeping the other fixed) that
-  also failed, but for a different reason: it's genuinely ambiguous
-  whether "instead" should replace team_a or team_b, and no amount of
-  player/year carry-over fixes that specific ambiguity. Flagged
-  separately in the code as "hard case, not assumed to pass."
+- **D5** ("And how did he do in round 10 that year?", following a turn
+  that established Bontempelli + 2022) now correctly resolves "he" to
+  Bontempelli and "that year" to 2022 via the new history lookups.
+- **D7** (same root cause, plus an off-topic interruption turn beforehand)
+  now also passes, confirming the fix generalizes past the interruption
+  case, not just the simple one.
 
-### Concrete improvement (the one requested by the brief)
+**D3 still fails**, and is not assumed fixed by this change: "what about
+against Collingwood *instead*?" swaps one team while keeping the other
+fixed. This is a genuinely different, harder ambiguity (does "instead"
+replace team_a or team_b?) that the player/year carry-over fix doesn't
+address, since it's a team-level resolution question, not a missing-slot
+problem. Left as a known, documented gap.
 
-Add `_players_from_history(chat_history)` and `_year_from_history(chat_history)`
-to `resolver.py`, mirroring the existing `_teams_from_history` pattern
-exactly (scan `chat_history` in reverse, look for the last turn ended
-with a resolved `player_name`/`year` in its logged trace or extracted
-entities, return it as a fallback source when the current turn's own
-extraction comes up empty). This closes D5/D7 with the same
-"proven pattern, not a new architecture" approach `until_year` and the
-disposal-derivation fix already used successfully in the Day 4 work --
-low-risk because it reuses `_teams_from_history`'s exact shape rather
-than introducing a new resolution mechanism.
+### Improvement that was implemented (matches what this report originally proposed)
+
+`_players_from_history(chat_history)` and `_year_from_history(chat_history)`
+were added to `resolver.py`, mirroring `_teams_from_history`'s exact shape
+(scan `chat_history` in reverse for the last resolved `player_name`/`year`,
+return it as a fallback source when the current turn's own extraction comes
+up empty). Confirmed via `grep` against the submitted `resolver.py` and by
+rerunning `test_eval_suite.py`, not just claimed -- this is the same
+"proven pattern, not a new architecture" approach used successfully
+elsewhere in this codebase.
 
 ## Benchmark comparison: match-winner model vs. a naive ladder baseline
 

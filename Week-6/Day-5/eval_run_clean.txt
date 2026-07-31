@@ -1,4 +1,3 @@
-[predict.py] Warning: /home/claude/day5/../afl_players_info_raw.csv not found, predict_top_player will return player_id only, no player_name.
 [PASS] [A: Factual/Retrieval Accuracy] A1: Richmond vs Collingwood head-to-head (all years)
 [PASS] [A: Factual/Retrieval Accuracy] A2: Western Bulldogs vs Richmond head-to-head (all years)
 [PASS] [A: Factual/Retrieval Accuracy] A3: Dustin Martin 2017 season stats
@@ -26,11 +25,9 @@
 [FAIL] [D: Multi-turn Coherence] D3: Turn 3: 'instead' swap of one team in a follow-up (hard case, not assumed to pass)
        -> That's a general AFL knowledge question (no dataset tool covers it), which this node answers via an LLM call using the same SYSTEM_PROMPT constraints as Day 3's agent (no invented scores, years, or na
 [PASS] [D: Multi-turn Coherence] D4: Turn 1: season stats lookup establishes player+year context
-[FAIL] [D: Multi-turn Coherence] D5: Turn 2: 'he' + 'that year' resolves to Bontempelli + 2022 without restating either
-       -> I want to make sure I get this right rather than guess: I need a bit more detail to answer that.
+[PASS] [D: Multi-turn Coherence] D5: Turn 2: 'he' + 'that year' resolves to Bontempelli + 2022 without restating either
 [PASS] [D: Multi-turn Coherence] D6: Turn 3: off-topic interruption mid-conversation still refuses correctly
-[FAIL] [D: Multi-turn Coherence] D7: Turn 4: self-correcting query (says head-to-head, corrects to stats mid-sentence) still resolves correctly after the off-topic interruption
-       -> I want to make sure I get this right rather than guess: I need a bit more detail to answer that.
+[PASS] [D: Multi-turn Coherence] D7: Turn 4: self-correcting query (says head-to-head, corrects to stats mid-sentence) still resolves correctly after the off-topic interruption
 
 ==========================================================================================
 RESULTS TABLE (Task 2)
@@ -40,10 +37,10 @@ Category                                Pass    Total   Pass rate
 A: Factual/Retrieval Accuracy           7       7       100%
 B: Prediction Sanity                    7       7       100%
 C: Scope Guardrails                     6       7       86%
-D: Multi-turn Coherence                 4       7       57%
+D: Multi-turn Coherence                 6       7       86%
 ------------------------------------------------------------------------------------------
-OVERALL                                 24      28      86%
+OVERALL                                 26      28      93%
 
-Weakest category: D: Multi-turn Coherence (57% pass rate)
+Weakest category: C: Scope Guardrails (86% pass rate)
 
 Total cases run: 28
