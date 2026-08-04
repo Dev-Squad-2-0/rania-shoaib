@@ -1,0 +1,15 @@
+services:
+  postgres:
+    image: postgres:16
+    container_name: realestate-db
+    environment:
+      POSTGRES_USER: rania
+      POSTGRES_PASSWORD: mm1234
+      POSTGRES_DB: realestate_agent
+    ports:
+      - "5432:5432"
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+
+volumes:
+  pgdata:

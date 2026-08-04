@@ -1,0 +1,107 @@
+RealEstate Hub — Company Brochure & Client Handbook
+(Synthetic document for bootcamp RAG testing purposes only)
+
+About RealEstate Hub
+
+RealEstate Hub was established to simplify the property buying, renting, and investment
+process across Pakistan's major cities. We work with a network of verified developers
+including Bahria Town Developers, DHA City Developments, Emaar Pakistan, Fazaia Housing
+Scheme, and Lake City Developers. Our listings span residential houses, apartments,
+commercial units, and investment plots across Karachi, Lahore, Islamabad, and Rawalpindi.
+Every property listed on our platform goes through a verification process before it
+appears to clients, covering ownership documentation, developer NOC status where
+applicable, and physical site condition checks.
+
+Our Services
+
+We offer end-to-end support across four main service lines. First, property search and
+recommendation, where our consultants match client requirements — budget, location,
+property type, and purpose — against our verified inventory. Second, site visit
+coordination, which is provided free of charge regardless of whether a booking is made.
+Third, legal and documentation support, including registry assistance, transfer
+paperwork, and dispute-free title verification. Fourth, post-sale support, covering
+handover coordination and ongoing client queries after a transaction closes.
+
+Payment Plans and Financing
+
+Most under-construction and newly launched properties on our platform offer flexible
+installment plans, typically ranging from 20% to 50% down payment with the remaining
+balance spread across 12 to 48 months depending on the developer's policy. Ready-to-move
+properties, particularly resale units, often require full payment at the time of
+transfer, though this varies by seller. Clients interested in bank financing can request
+guidance through our partner bank relationships; final loan approval remains subject to
+each bank's independent underwriting policy, and RealEstate Hub does not guarantee loan
+approval outcomes. Late installment payments may be subject to penalties as defined in
+each property's individual payment plan documentation, and clients should review these
+terms carefully before committing to a purchase.
+
+Rental Policy
+
+Rental agreements arranged through RealEstate Hub are typically structured for an
+eleven-month term, renewable by mutual agreement between landlord and tenant. Security
+deposits are generally equivalent to two months' rent, though this can vary by property
+and landlord preference. Furnished and semi-furnished rental options are available on a
+subset of listings and are clearly indicated in each property's description. Tenants are
+responsible for utility costs unless otherwise stated in the rental agreement, and any
+maintenance requests during the tenancy period should be routed through our post-sale
+support line.
+
+Investment Guidance
+
+For clients exploring real estate as an investment vehicle, we provide historical
+appreciation and rental yield data where available, sourced from our own transaction
+records and publicly available market reports. It is important to note that RealEstate
+Hub does not guarantee future appreciation, rental yield, or investment returns of any
+kind; all figures shared with clients are historical and illustrative only, not a
+promise of future performance. Areas such as Bahria Town extensions and newer DHA phases
+have shown strong historical appreciation trends, but individual investment outcomes
+depend on market conditions, property-specific factors, and timing that are outside our
+control.
+
+Commercial Property Considerations
+
+Clients purchasing or renting commercial units should be aware that additional
+documentation is typically required, including business registration details and a
+valid NTN (National Tax Number) for the purchasing entity. Commercial properties are
+often subject to different zoning and usage regulations depending on the specific
+development authority governing the area, and our consultants can provide zoning
+information available at the time of inquiry. Some commercial listings require full
+payment prior to possession rather than offering installment plans, and this is
+specified individually per listing.
+
+Site Visits and Booking Process
+
+Site visits can be scheduled seven days a week between 10:00 AM and 7:00 PM, based on
+client availability, and there is no charge for this service. Families are encouraged to
+attend visits together so that all relevant decision-makers can evaluate a property
+directly. No booking amount or deposit is required simply to view a property; a booking
+is only initiated once a client has made a decision to proceed. If a client does not
+find a suitable property during an initial visit, our consultants will continue
+proposing alternative options that better match stated requirements at no additional
+cost.
+
+Legal and Title Verification
+
+All properties listed with RealEstate Hub are verified for clear title prior to being
+made available to clients, and supporting documentation is made available for review
+during the site visit process. In the rare event that a title dispute or documentation
+concern arises after listing, our legal support team is available to guide clients
+through the appropriate resolution steps. RealEstate Hub's legal advisory support during
+the registry and transfer process is provided at no additional charge to the client.
+
+Frequently Escalated Situations
+
+Certain client situations are routed directly to a human consultant rather than being
+handled purely through automated channels. These include requests for price negotiation
+below the listed price, detailed financial projections for large commercial or
+investment transactions, complaints regarding a prior interaction with the company, and
+any legal or contractual matter beyond standard registry guidance. Clients are always
+informed clearly when their inquiry is being escalated, along with an expected timeline
+for a human consultant to follow up.
+
+Contact and Operating Hours
+
+RealEstate Hub's consultant line operates daily from 9:00 AM to 9:00 PM across all
+covered cities. Email inquiries are typically answered within one business day. Clients
+with an active booking or ongoing transaction are assigned a dedicated point of contact
+for the duration of their engagement with the company.
