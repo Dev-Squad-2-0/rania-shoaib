@@ -1,0 +1,202 @@
+[
+  {
+    "n": 1,
+    "question": "kya installment plan available hai?",
+    "answerable": true,
+    "retrieval_hit": true,
+    "answer": "Ji haan, humari platform par aksar under‑construction aur nayi launch hui properties ke liye flexible installment plans miltay hain. Down payment aam tor par 20% se 50% tak hoti hai aur baaqi balance 12 se 48 maheenon tak spread hota hai, developer ki policy ke mutabiq.",
+    "grounded": true,
+    "hallucinated": false,
+    "reasoning": "All claims about installment plan availability and its terms are directly supported by the provided context."
+  },
+  {
+    "n": 2,
+    "question": "security deposit kitna hota hai rent ke liye?",
+    "answerable": true,
+    "retrieval_hit": true,
+    "answer": "Security deposit aam tor par rent ke do mahine ke barabar hota hai, lekin property ya landlord ki pasand ke mutabiq farq ho sakta hai.",
+    "grounded": true,
+    "hallucinated": false,
+    "reasoning": "The answer's claim that security deposits are typically two months' rent and may vary matches the context exactly."
+  },
+  {
+    "n": 3,
+    "question": "commercial property ke liye kya documentation chahiye?",
+    "answerable": true,
+    "retrieval_hit": true,
+    "answer": "Ji, commercial property kharidne ya rent par lene ke liye aap ko business registration details aur valid NTN (National Tax Number) submit karna hota hai.",
+    "grounded": true,
+    "hallucinated": false,
+    "reasoning": "The answer only states that business registration details and a valid NTN are required, which is directly supported by the context."
+  },
+  {
+    "n": 4,
+    "question": "site visit book karne ka process kya hai?",
+    "answerable": true,
+    "retrieval_hit": true,
+    "answer": "Mujhe maazrat chahta hoon, lekin site visit book karne ka detail process yahan mojood nahi hai.",
+    "grounded": true,
+    "hallucinated": false,
+    "reasoning": "The answer correctly states that the detailed booking process is not in the provided context, which matches the lack of such information."
+  },
+  {
+    "n": 5,
+    "question": "kya aap registry mein madad karte hain?",
+    "answerable": true,
+    "retrieval_hit": true,
+    "answer": "Ji bilkul, hum registry aur transfer process ke liye legal advisory support free mein provide karte hain.",
+    "grounded": true,
+    "hallucinated": false,
+    "reasoning": "The answer correctly states that legal advisory support for registry is provided for free, which is directly mentioned in the context."
+  },
+  {
+    "n": 6,
+    "question": "rental agreement kitne mahine ka hota hai?",
+    "answerable": true,
+    "retrieval_hit": true,
+    "answer": "Rental agreement aam tor par gyaarah mahine ka hota hai.",
+    "grounded": true,
+    "hallucinated": false,
+    "reasoning": "The answer states the rental agreement is typically eleven months, which is directly supported by the context."
+  },
+  {
+    "n": 7,
+    "question": "bank financing ke liye kya madad milti hai?",
+    "answerable": true,
+    "retrieval_hit": true,
+    "answer": "Ji bilkul, agar aap bank financing mein interested hain to aap RealEstate Hub ke partner banks se guidance le sakte hain. Lekin loan ki final approval har bank ke apne underwriting policy par depend karti hai aur hum guarantee nahi karte ke aapka loan approve ho jayega.",
+    "grounded": true,
+    "hallucinated": false,
+    "reasoning": "The answer's claims about requesting guidance, underwriting policy dependence, and lack of guarantee are directly supported by the context."
+  },
+  {
+    "n": 8,
+    "question": "late payment par kya penalty lagti hai?",
+    "answerable": true,
+    "retrieval_hit": true,
+    "answer": "Late payment ka penalty har property ke payment‑plan document mein define hota hai. Iski exact rashi ya shartein aapko uss specific document se milengi; hamare paas abhi koi aur detail maujood nahi.",
+    "grounded": true,
+    "hallucinated": false,
+    "reasoning": "The answer only states that penalties are defined in each property's payment plan document and that details are unavailable, which aligns with the context and introduces no unsupported facts."
+  },
+  {
+    "n": 9,
+    "question": "kaunse developers ke saath aap kaam karte hain?",
+    "answerable": true,
+    "retrieval_hit": true,
+    "answer": "Ji, hum Bahria Town Developers aur DHA City ke developers ke saath kaam karte hain.",
+    "grounded": true,
+    "hallucinated": false,
+    "reasoning": "Answer lists Bahria Town Developers and DHA City, which are directly cited in the context, with no unsupported claims."
+  },
+  {
+    "n": 10,
+    "question": "site visit ke liye koi charge hai?",
+    "answerable": true,
+    "retrieval_hit": true,
+    "answer": "Nahi, site visit ke liye koi charge nahi hai.",
+    "grounded": true,
+    "hallucinated": false,
+    "reasoning": "The answer states there is no charge for site visits, which is directly supported by the context's mention of no charge for this service."
+  },
+  {
+    "n": 11,
+    "question": "title dispute hone par kya hota hai?",
+    "answerable": true,
+    "retrieval_hit": true,
+    "answer": "Ji, agar title dispute ya documentation issue hota hai, to hamari legal support team client ko appropriate resolution steps ke baare mein guide karti hai.",
+    "grounded": true,
+    "hallucinated": false,
+    "reasoning": "The answer states that the legal support team guides clients on resolution steps, which is directly supported by the context."
+  },
+  {
+    "n": 12,
+    "question": "investment ke liye kya guidance milti hai?",
+    "answerable": true,
+    "retrieval_hit": true,
+    "answer": "Ji, investment ke liye hum aap ko historical appreciation aur rental yield ka data dete hain, jo humare apne transaction records aur market reports se milta hai. Agar aap bank financing ka soch rahe hain, to hum apne partner banks ke through guidance provide karte hain, lekin final loan approval unke underwriting policy par depend karta hai. Hum future appreciation ya rental income guarantee nahi karte; ye market conditions aur property specific factors par depend karta hai.",
+    "grounded": true,
+    "hallucinated": false,
+    "reasoning": "All factual statements about providing historical appreciation, rental yield data, bank financing guidance, and lack of guarantee are directly supported by the context."
+  },
+  {
+    "n": 13,
+    "question": "kya aap resale properties bhi list karte hain?",
+    "answerable": true,
+    "retrieval_hit": true,
+    "answer": "Ji bilkul, hum resale properties bhi list karte hain. Sab properties hum verify kar ke platform pe dalte hain.",
+    "grounded": true,
+    "hallucinated": false,
+    "reasoning": "The answer's claims that resale properties are listed and that all properties are verified are directly supported by the context."
+  },
+  {
+    "n": 14,
+    "question": "what is the company's refund policy on cancelled bookings?",
+    "answerable": false,
+    "retrieval_hit": true,
+    "answer": "Mujhe maaf kijiye, is silsile mein refund policy ki malumat maujood nahi hai.",
+    "grounded": true,
+    "hallucinated": false,
+    "reasoning": "The answer correctly states that refund policy information is not present in the context, and it does not introduce any unsupported facts."
+  },
+  {
+    "n": 15,
+    "question": "does the company offer international property listings outside Pakistan?",
+    "answerable": false,
+    "retrieval_hit": true,
+    "answer": "Maaf karain, humaray paas is silsilay mein koi malumat maujood nahi hai.",
+    "grounded": true,
+    "hallucinated": false,
+    "reasoning": "The answer states that no information is available, which aligns with the context that provides no details about international listings."
+  },
+  {
+    "n": 16,
+    "question": "kya aap crypto mein payment accept karte hain?",
+    "answerable": false,
+    "retrieval_hit": true,
+    "answer": "Mujhe maaf kijiye, crypto ke zariye payment accept karne ke baare mein humare paas koi malumat available nahin hai.",
+    "grounded": true,
+    "hallucinated": false,
+    "reasoning": "The answer correctly states that no information about crypto payments is available, which aligns with the context lacking any such details."
+  },
+  {
+    "n": 17,
+    "question": "what discount do returning clients get on their third purchase?",
+    "answerable": false,
+    "retrieval_hit": true,
+    "answer": "Mujhe maaf kijiye, is silsilay mein returning clients ke third purchase par discount ki malumat maujood nahi hai.",
+    "grounded": true,
+    "hallucinated": false,
+    "reasoning": "The answer correctly states that discount information is not available, which matches the lack of such details in the context."
+  },
+  {
+    "n": 18,
+    "question": "consultants budget aur location ke against kaise match karte hain?",
+    "answerable": true,
+    "retrieval_hit": true,
+    "answer": "Ji bilkul, hamare consultants aap ke budget aur location ki preferences ko hamari verified inventory se cross‑check karte hain. Phir wo aap ko un properties ka suggestion dete hain jo un criteria se match karti hain.",
+    "grounded": true,
+    "hallucinated": false,
+    "reasoning": "The answer describes consultants cross-checking budget and location against verified inventory and suggesting matching properties, which is directly supported by the context."
+  },
+  {
+    "n": 19,
+    "question": "under-construction properties par down payment kitna hota hai?",
+    "answerable": true,
+    "retrieval_hit": true,
+    "answer": "Ji bilkul, under‑construction properties ke liye down payment aam tor par 20 se 50 percent tak hota hai. Specific property ke liye exact ratio alag ho sakta hai, is liye har listing ka payment plan dekhna zaroori hai.",
+    "grounded": true,
+    "hallucinated": false,
+    "reasoning": "The answer's claim of a 20‑50% down payment matches the range provided in the context and no unsupported facts are added."
+  },
+  {
+    "n": 20,
+    "question": "zoning rules commercial properties par kaise apply hoti hain?",
+    "answerable": true,
+    "retrieval_hit": true,
+    "answer": "Ji, commercial properties ke liye zoning rules us area ki development authority par depend karte hain. Har authority ki apni zoning aur usage regulations hoti hain. Agar aapko specific details chahiye, to humare consultants se raabta karein; woh aapko maujooda zoning information de denge.",
+    "grounded": true,
+    "hallucinated": false,
+    "reasoning": "The answer restates that zoning rules depend on the local development authority and suggests consulting experts, which is directly supported by the context without adding unsupported specifics."
+  }
+]

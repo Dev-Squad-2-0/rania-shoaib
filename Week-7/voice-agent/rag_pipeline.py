@@ -56,13 +56,17 @@ def load_documents(docs_dir: str = DOCS_DIR) -> list[dict]:
 # ---------------------------------------------------------------
 # 2. CHUNKING
 # ---------------------------------------------------------------
-def chunk_text(text: str, chunk_size: int = 500, overlap: int = 50) -> list[str]:
+def chunk_text(text: str, chunk_size: int = 200, overlap: int = 50) -> list[str]:
     """
     Simple fixed-size character chunker with overlap.
     chunk_size / overlap are in characters, not tokens (good enough
     for evaluation purposes at this stage).
     Overlap prevents a sentence from being awkwardly split with no
     shared context between adjacent chunks.
+
+    chunk_size=200 chosen based on evaluate_chunk_sizes.py results:
+    200 chars beat 500 and 1000 on 3 of 4 test queries (lower distance
+    = closer semantic match).
     """
     chunks = []
     start = 0
@@ -97,9 +101,9 @@ def build_vector_store(documents: list[dict], chunk_size: int, overlap: int = 50
         pass
 
     collection = client.create_collection(
-    name=full_collection_name,
-    embedding_function=multilingual_ef
-)
+        name=full_collection_name,
+        embedding_function=multilingual_ef
+    )
     all_chunks, all_ids, all_metadata = [], [], []
     for doc in documents:
         chunks = chunk_text(doc["text"], chunk_size=chunk_size, overlap=overlap)
@@ -115,10 +119,14 @@ def build_vector_store(documents: list[dict], chunk_size: int, overlap: int = 50
 # ---------------------------------------------------------------
 # 4. RETRIEVER
 # ---------------------------------------------------------------
-def retrieve(collection, query: str, n_results: int = 3) -> list[dict]:
+def retrieve(collection, query: str, n_results: int = 5) -> list[dict]:
     """
     Returns top-n matching chunks with their similarity distance,
     so retrieval quality can be inspected directly during evaluation.
+
+    n_results bumped from 3 to 5: hallucination-eval testing showed the
+    "site visit" section sometimes ranked outside the top 3, so widening
+    the window gives the answer a better chance of surfacing.
     """
     results = collection.query(query_texts=[query], n_results=n_results)
     output = []
@@ -142,11 +150,18 @@ def generate_answer(query: str, retrieved_chunks: list[dict]) -> str:
     context = "\n\n".join(c["text"] for c in retrieved_chunks)
 
     system_prompt = (
-        "You are a real estate assistant. Answer ONLY using the provided "
-        "context. If the context does not contain the answer, say clearly "
-        "that this information isn't available rather than guessing. "
-        "Keep the answer concise and in UrduLish (mixed Urdu-English, "
-        "natural conversational tone)."
+        "You are a real estate assistant speaking to a customer over the phone. "
+        "Answer ONLY using the provided context. If the context does not contain "
+        "the answer, say clearly that this information isn't available rather "
+        "than guessing.\n\n"
+        "STRICT OUTPUT FORMAT — this matters because your text is read aloud by "
+        "a text-to-speech engine, not displayed on screen:\n"
+        "- Reply ONLY in Roman script (Urdu written in English letters mixed "
+        "with English words, e.g. 'Ji bilkul, aap ka budget kya hai'). "
+        "NEVER use Urdu/Nastaliq script under any circumstance.\n"
+        "- NEVER use emojis or symbols of any kind.\n"
+        "- Keep sentences short and natural, the way a professional Pakistani "
+        "real estate consultant actually speaks on a call, not a written document."
     )
 
     user_prompt = f"Context:\n{context}\n\nQuestion: {query}"
@@ -169,11 +184,11 @@ if __name__ == "__main__":
     docs = load_documents()
     print(f"Loaded {len(docs)} document(s): {[d['source'] for d in docs]}")
 
-    collection, chunk_count = build_vector_store(docs, chunk_size=500)
-    print(f"Created {chunk_count} chunks (size=500) in vector store.")
+    collection, chunk_count = build_vector_store(docs, chunk_size=200)
+    print(f"Created {chunk_count} chunks (size=200) in vector store.")
 
     query = "kya installment plan available hai aur late payment par kya hota hai?"
-    retrieved = retrieve(collection, query, n_results=3)
+    retrieved = retrieve(collection, query, n_results=5)
 
     print(f"\nTop retrieved chunks for: '{query}'")
     for r in retrieved:
