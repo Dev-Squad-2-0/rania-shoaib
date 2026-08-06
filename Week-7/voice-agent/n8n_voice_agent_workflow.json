@@ -1,0 +1,178 @@
+{
+  "name": "RealEstate Hub Voice Agent - Appointment Automation",
+  "nodes": [
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "voice-agent",
+        "responseMode": "responseNode",
+        "options": {}
+      },
+      "id": "webhook_node",
+      "name": "Call Outcome Webhook",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2,
+      "position": [-40, 300]
+    },
+    {
+      "parameters": {
+        "rules": {
+          "values": [
+            {
+              "conditions": {
+                "options": {"caseSensitive": true, "leftValue": "", "typeValidation": "strict"},
+                "conditions": [
+                  {
+                    "leftValue": "={{$json.intent}}",
+                    "rightValue": "book",
+                    "operator": {"type": "string", "operation": "equals"}
+                  }
+                ],
+                "combinator": "and"
+              },
+              "outputKey": "book"
+            },
+            {
+              "conditions": {
+                "options": {"caseSensitive": true, "leftValue": "", "typeValidation": "strict"},
+                "conditions": [
+                  {
+                    "leftValue": "={{$json.intent}}",
+                    "rightValue": "reschedule",
+                    "operator": {"type": "string", "operation": "equals"}
+                  }
+                ],
+                "combinator": "and"
+              },
+              "outputKey": "reschedule"
+            },
+            {
+              "conditions": {
+                "options": {"caseSensitive": true, "leftValue": "", "typeValidation": "strict"},
+                "conditions": [
+                  {
+                    "leftValue": "={{$json.intent}}",
+                    "rightValue": "cancel",
+                    "operator": {"type": "string", "operation": "equals"}
+                  }
+                ],
+                "combinator": "and"
+              },
+              "outputKey": "cancel"
+            },
+            {
+              "conditions": {
+                "options": {"caseSensitive": true, "leftValue": "", "typeValidation": "strict"},
+                "conditions": [
+                  {
+                    "leftValue": "={{$json.intent}}",
+                    "rightValue": "query",
+                    "operator": {"type": "string", "operation": "equals"}
+                  }
+                ],
+                "combinator": "and"
+              },
+              "outputKey": "query"
+            }
+          ]
+        },
+        "options": {"fallbackOutput": "none"}
+      },
+      "id": "switch_node",
+      "name": "Route by Intent",
+      "type": "n8n-nodes-base.switch",
+      "typeVersion": 3,
+      "position": [200, 300]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "http://localhost:8000/book",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ $json }}",
+        "options": {}
+      },
+      "id": "book_node",
+      "name": "Call /book",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [460, 100]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "http://localhost:8000/reschedule",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ $json }}",
+        "options": {}
+      },
+      "id": "reschedule_node",
+      "name": "Call /reschedule",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [460, 260]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "http://localhost:8000/cancel",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ $json }}",
+        "options": {}
+      },
+      "id": "cancel_node",
+      "name": "Call /cancel",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [460, 420]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "http://localhost:8000/query",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ $json }}",
+        "options": {}
+      },
+      "id": "query_node",
+      "name": "Call /query",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [460, 580]
+    },
+    {
+      "parameters": {
+        "respondWith": "allIncomingItems",
+        "options": {}
+      },
+      "id": "respond_node",
+      "name": "Respond to Caller Pipeline",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.1,
+      "position": [720, 300]
+    }
+  ],
+  "connections": {
+    "Call Outcome Webhook": {
+      "main": [[{"node": "Route by Intent", "type": "main", "index": 0}]]
+    },
+    "Route by Intent": {
+      "main": [
+        [{"node": "Call /book", "type": "main", "index": 0}],
+        [{"node": "Call /reschedule", "type": "main", "index": 0}],
+        [{"node": "Call /cancel", "type": "main", "index": 0}],
+        [{"node": "Call /query", "type": "main", "index": 0}]
+      ]
+    },
+    "Call /book": {"main": [[{"node": "Respond to Caller Pipeline", "type": "main", "index": 0}]]},
+    "Call /reschedule": {"main": [[{"node": "Respond to Caller Pipeline", "type": "main", "index": 0}]]},
+    "Call /cancel": {"main": [[{"node": "Respond to Caller Pipeline", "type": "main", "index": 0}]]},
+    "Call /query": {"main": [[{"node": "Respond to Caller Pipeline", "type": "main", "index": 0}]]}
+  },
+  "active": false,
+  "settings": {"executionOrder": "v1"}
+}
