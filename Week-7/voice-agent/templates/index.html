@@ -1,0 +1,596 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>RealEstate Hub — AI Voice Agent (Ayesha)</title>
+    <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+    <style>
+        :root {
+            --bg-dark: #0f172a;
+            --card-bg: rgba(30, 41, 59, 0.7);
+            --border-color: rgba(255, 255, 255, 0.1);
+            --primary-emerald: #10b981;
+            --primary-teal: #14b8a6;
+            --accent-cyan: #06b6d4;
+            --text-main: #f8fafc;
+            --text-muted: #94a3b8;
+        }
+
+        * {
+            box-sizing: border-box;
+            margin: 0;
+            padding: 0;
+            font-family: 'Outfit', sans-serif;
+        }
+
+        body {
+            background-color: var(--bg-dark);
+            color: var(--text-main);
+            min-height: 100vh;
+            display: flex;
+            flex-direction: column;
+            background-image: 
+                radial-gradient(at 0% 0%, rgba(16, 185, 129, 0.12) 0px, transparent 50%),
+                radial-gradient(at 100% 100%, rgba(6, 182, 212, 0.12) 0px, transparent 50%);
+        }
+
+        header {
+            padding: 1.25rem 2rem;
+            border-bottom: 1px solid var(--border-color);
+            background: rgba(15, 23, 42, 0.8);
+            backdrop-filter: blur(12px);
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+
+        .logo-group {
+            display: flex;
+            align-items: center;
+            gap: 0.75rem;
+        }
+
+        .logo-badge {
+            background: linear-gradient(135deg, var(--primary-emerald), var(--accent-cyan));
+            color: #0f172a;
+            font-weight: 800;
+            padding: 0.4rem 0.8rem;
+            border-radius: 8px;
+            font-size: 1.1rem;
+        }
+
+        .logo-title {
+            font-size: 1.3rem;
+            font-weight: 700;
+            letter-spacing: -0.02em;
+        }
+
+        .status-badge {
+            display: flex;
+            align-items: center;
+            gap: 0.5rem;
+            font-size: 0.875rem;
+            color: var(--primary-emerald);
+            background: rgba(16, 185, 129, 0.1);
+            padding: 0.4rem 1rem;
+            border-radius: 9999px;
+            border: 1px solid rgba(16, 185, 129, 0.3);
+        }
+
+        .pulse-dot {
+            width: 8px;
+            height: 8px;
+            background-color: var(--primary-emerald);
+            border-radius: 50%;
+            box-shadow: 0 0 10px var(--primary-emerald);
+            animation: pulse 2s infinite;
+        }
+
+        @keyframes pulse {
+            0% { transform: scale(0.95); box-shadow: 0 0 0 0 rgba(16, 185, 129, 0.7); }
+            70% { transform: scale(1); box-shadow: 0 0 0 10px rgba(16, 185, 129, 0); }
+            100% { transform: scale(0.95); box-shadow: 0 0 0 0 rgba(16, 185, 129, 0); }
+        }
+
+        main {
+            flex: 1;
+            max-width: 1200px;
+            width: 100%;
+            margin: 0 auto;
+            padding: 2rem;
+            display: grid;
+            grid-template-columns: 1fr 340px;
+            gap: 2rem;
+        }
+
+        .studio-card {
+            background: var(--card-bg);
+            border: 1px solid var(--border-color);
+            border-radius: 20px;
+            backdrop-filter: blur(16px);
+            display: flex;
+            flex-direction: column;
+            overflow: hidden;
+            box-shadow: 0 20px 40px rgba(0, 0, 0, 0.4);
+        }
+
+        .caller-bar {
+            padding: 1rem 1.5rem;
+            border-bottom: 1px solid var(--border-color);
+            background: rgba(15, 23, 42, 0.4);
+            display: flex;
+            gap: 1rem;
+            align-items: center;
+        }
+
+        .form-control {
+            display: flex;
+            flex-direction: column;
+            gap: 0.25rem;
+            flex: 1;
+        }
+
+        .form-control label {
+            font-size: 0.75rem;
+            text-transform: uppercase;
+            letter-spacing: 0.05em;
+            color: var(--text-muted);
+        }
+
+        .form-control input {
+            background: rgba(15, 23, 42, 0.6);
+            border: 1px solid var(--border-color);
+            border-radius: 8px;
+            padding: 0.5rem 0.75rem;
+            color: #fff;
+            font-size: 0.9rem;
+            outline: none;
+            transition: border-color 0.2s;
+        }
+
+        .form-control input:focus {
+            border-color: var(--primary-emerald);
+        }
+
+        .chat-container {
+            flex: 1;
+            padding: 1.5rem;
+            overflow-y: auto;
+            display: flex;
+            flex-direction: column;
+            gap: 1.25rem;
+            min-height: 380px;
+            max-height: 480px;
+        }
+
+        .message {
+            display: flex;
+            gap: 1rem;
+            max-width: 85%;
+        }
+
+        .message.user {
+            align-self: flex-end;
+            flex-direction: row-reverse;
+        }
+
+        .avatar {
+            width: 38px;
+            height: 38px;
+            border-radius: 50%;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-weight: 700;
+            font-size: 0.9rem;
+            flex-shrink: 0;
+        }
+
+        .message.user .avatar {
+            background: linear-gradient(135deg, #3b82f6, #6366f1);
+        }
+
+        .message.agent .avatar {
+            background: linear-gradient(135deg, var(--primary-emerald), var(--accent-cyan));
+            color: #0f172a;
+        }
+
+        .msg-bubble {
+            background: rgba(15, 23, 42, 0.7);
+            border: 1px solid var(--border-color);
+            padding: 1rem 1.25rem;
+            border-radius: 16px;
+            line-height: 1.5;
+            font-size: 0.95rem;
+            position: relative;
+        }
+
+        .message.user .msg-bubble {
+            background: linear-gradient(135deg, rgba(59, 130, 246, 0.2), rgba(99, 102, 241, 0.2));
+            border-color: rgba(99, 102, 241, 0.4);
+            border-top-right-radius: 4px;
+        }
+
+        .message.agent .msg-bubble {
+            background: linear-gradient(135deg, rgba(16, 185, 129, 0.15), rgba(6, 182, 212, 0.15));
+            border-color: rgba(16, 185, 129, 0.4);
+            border-top-left-radius: 4px;
+        }
+
+        .msg-meta {
+            margin-top: 0.5rem;
+            font-size: 0.75rem;
+            color: var(--text-muted);
+            display: flex;
+            gap: 0.75rem;
+            align-items: center;
+        }
+
+        .controls-area {
+            padding: 1.5rem;
+            border-top: 1px solid var(--border-color);
+            background: rgba(15, 23, 42, 0.5);
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            gap: 1rem;
+        }
+
+        .mic-button {
+            width: 80px;
+            height: 80px;
+            border-radius: 50%;
+            background: linear-gradient(135deg, var(--primary-emerald), var(--accent-cyan));
+            border: none;
+            cursor: pointer;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            box-shadow: 0 0 30px rgba(16, 185, 129, 0.4);
+            transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+            outline: none;
+            position: relative;
+        }
+
+        .mic-button:hover {
+            transform: scale(1.06);
+            box-shadow: 0 0 45px rgba(16, 185, 129, 0.6);
+        }
+
+        .mic-button.recording {
+            background: linear-gradient(135deg, #ef4444, #f97316);
+            box-shadow: 0 0 40px rgba(239, 68, 68, 0.7);
+            animation: pulse-red 1.5s infinite;
+        }
+
+        @keyframes pulse-red {
+            0% { box-shadow: 0 0 0 0 rgba(239, 68, 68, 0.7); }
+            70% { box-shadow: 0 0 0 20px rgba(239, 68, 68, 0); }
+            100% { box-shadow: 0 0 0 0 rgba(239, 68, 68, 0); }
+        }
+
+        .mic-icon {
+            width: 32px;
+            height: 32px;
+            fill: #0f172a;
+        }
+
+        .mic-button.recording .mic-icon {
+            fill: #ffffff;
+        }
+
+        .mic-status {
+            font-size: 0.9rem;
+            color: var(--text-muted);
+            font-weight: 500;
+        }
+
+        .side-panel {
+            display: flex;
+            flex-direction: column;
+            gap: 1.5rem;
+        }
+
+        .info-card {
+            background: var(--card-bg);
+            border: 1px solid var(--border-color);
+            border-radius: 16px;
+            padding: 1.25rem;
+            backdrop-filter: blur(16px);
+        }
+
+        .info-card h3 {
+            font-size: 0.95rem;
+            text-transform: uppercase;
+            letter-spacing: 0.05em;
+            color: var(--accent-cyan);
+            margin-bottom: 0.75rem;
+        }
+
+        .tag-list {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 0.5rem;
+        }
+
+        .tag {
+            background: rgba(255, 255, 255, 0.06);
+            border: 1px solid var(--border-color);
+            padding: 0.35rem 0.75rem;
+            border-radius: 8px;
+            font-size: 0.8rem;
+            color: var(--text-main);
+        }
+
+        .tag.intent {
+            background: rgba(16, 185, 129, 0.15);
+            border-color: rgba(16, 185, 129, 0.4);
+            color: var(--primary-emerald);
+            font-weight: 600;
+        }
+
+        .text-input-bar {
+            width: 100%;
+            display: flex;
+            gap: 0.75rem;
+        }
+
+        .text-input-bar input {
+            flex: 1;
+            background: rgba(15, 23, 42, 0.7);
+            border: 1px solid var(--border-color);
+            border-radius: 12px;
+            padding: 0.75rem 1rem;
+            color: #fff;
+            font-size: 0.95rem;
+            outline: none;
+        }
+
+        .text-input-bar button {
+            background: var(--primary-emerald);
+            border: none;
+            color: #0f172a;
+            font-weight: 700;
+            padding: 0.75rem 1.25rem;
+            border-radius: 12px;
+            cursor: pointer;
+            transition: background 0.2s;
+        }
+
+        .text-input-bar button:hover {
+            background: var(--primary-teal);
+        }
+    </style>
+</head>
+<body>
+    <header>
+        <div class="logo-group">
+            <div class="logo-badge">RH</div>
+            <div class="logo-title">RealEstate Hub — AI Voice Agent</div>
+        </div>
+        <div class="status-badge">
+            <div class="pulse-dot"></div>
+            <span>Ayesha (Pakistani Sales Rep) Online</span>
+        </div>
+    </header>
+
+    <main>
+        <div class="studio-card">
+            <div class="caller-bar">
+                <div class="form-control">
+                    <label>Caller Phone</label>
+                    <input type="text" id="clientPhone" value="+923001234567" placeholder="+923001234567">
+                </div>
+                <div class="form-control">
+                    <label>Caller Name</label>
+                    <input type="text" id="clientName" value="Rania" placeholder="Caller name...">
+                </div>
+            </div>
+
+            <div class="chat-container" id="chatBox">
+                <div class="message agent">
+                    <div class="avatar">A</div>
+                    <div class="msg-bubble">
+                        Assalam-o-Alaikum! RealEstate Hub se Ayesha baat kar rahi hoon. Main aap ki kis tarah madad kar sakti hoon?
+                        <div class="msg-meta"><span>Greeting</span> • <span>Initial Turn</span></div>
+                    </div>
+                </div>
+            </div>
+
+            <div class="controls-area">
+                <button class="mic-button" id="micBtn" title="Click to Record / Stop">
+                    <svg class="mic-icon" viewBox="0 0 24 24">
+                        <path d="M12 14c1.66 0 3-1.34 3-3V5c0-1.66-1.34-3-3-3S9 3.34 9 5v6c0 1.34 1.34 3 3 3z"/>
+                        <path d="M17 11c0 2.76-2.24 5-5 5s-5-2.24-5-5H5c0 3.53 2.61 6.43 6 6.92V21h2v-3.08c3.39-.49 6-3.39 6-6.92h-2z"/>
+                    </svg>
+                </button>
+                <div class="mic-status" id="micStatus">Click Microphone to speak in UrduLish...</div>
+
+                <div class="text-input-bar">
+                    <input type="text" id="textInput" placeholder="Or type a message in UrduLish (e.g. DHA mein 3 crore budget mein kya hai?)" onkeypress="if(event.key==='Enter') sendTextMessage()">
+                    <button onclick="sendTextMessage()">Send</button>
+                </div>
+            </div>
+        </div>
+
+        <div class="side-panel">
+            <div class="info-card">
+                <h3>Live Call Intelligence</h3>
+                <div style="margin-bottom: 0.75rem;">
+                    <div style="font-size: 0.75rem; color: var(--text-muted); margin-bottom: 0.25rem;">DETECTED INTENT</div>
+                    <div class="tag-list" id="intentTags">
+                        <span class="tag intent">query / greeting</span>
+                    </div>
+                </div>
+
+                <div>
+                    <div style="font-size: 0.75rem; color: var(--text-muted); margin-bottom: 0.25rem;">SLOTS & STATUS</div>
+                    <div class="tag-list" id="slotTags">
+                        <span class="tag">Active Call Session</span>
+                    </div>
+                </div>
+            </div>
+
+            <div class="info-card">
+                <h3>Voice Tech Stack</h3>
+                <div class="tag-list">
+                    <span class="tag">STT: Deepgram Nova-3</span>
+                    <span class="tag">LLM: LangGraph Stateful</span>
+                    <span class="tag">TTS: Fish Audio</span>
+                    <span class="tag">RAG: ChromaDB</span>
+                    <span class="tag">CRM: PostgreSQL</span>
+                </div>
+            </div>
+        </div>
+    </main>
+
+    <script>
+        let mediaRecorder;
+        let audioChunks = [];
+        let isRecording = false;
+
+        const micBtn = document.getElementById('micBtn');
+        const micStatus = document.getElementById('micStatus');
+        const chatBox = document.getElementById('chatBox');
+        const intentTags = document.getElementById('intentTags');
+        const slotTags = document.getElementById('slotTags');
+
+        micBtn.addEventListener('click', toggleRecording);
+
+        async function toggleRecording() {
+            if (!isRecording) {
+                try {
+                    const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+                    mediaRecorder = new MediaRecorder(stream);
+                    audioChunks = [];
+
+                    mediaRecorder.ondataavailable = event => {
+                        audioChunks.push(event.data);
+                    };
+
+                    mediaRecorder.onstop = async () => {
+                        const audioBlob = new Blob(audioChunks, { type: 'audio/m4a' });
+                        await processAudioInput(audioBlob);
+                    };
+
+                    mediaRecorder.start();
+                    isRecording = true;
+                    micBtn.classList.add('recording');
+                    micStatus.innerText = 'Listening... Speak in UrduLish now. Click again when done.';
+                } catch (err) {
+                    alert('Microphone access denied or unavailable: ' + err.message);
+                }
+            } else {
+                mediaRecorder.stop();
+                isRecording = false;
+                micBtn.classList.remove('recording');
+                micStatus.innerText = 'Processing Speech (Deepgram STT -> LangGraph -> Fish Audio TTS)...';
+            }
+        }
+
+        async function processAudioInput(audioBlob) {
+            const reader = new FileReader();
+            reader.readAsDataURL(audioBlob);
+            reader.onloadend = async () => {
+                const base64Audio = reader.result.split(',')[1];
+                const phone = document.getElementById('clientPhone').value;
+                const name = document.getElementById('clientName').value;
+
+                try {
+                    const response = await fetch('/voice_converse', {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({
+                            client_phone: phone,
+                            client_name: name,
+                            audio_base64: base64Audio,
+                            content_type: 'audio/m4a'
+                        })
+                    });
+
+                    const data = await response.json();
+                    if (!response.ok) throw new Error(data.detail || 'Voice API Error');
+
+                    // 1. Add User transcript bubble
+                    appendMessage('user', data.transcript, `STT Latency: ${data.stt_latency_ms}ms`);
+
+                    // 2. Add Agent response bubble
+                    appendMessage('agent', data.response_text, `TTS Latency: ${data.tts_latency_ms}ms`);
+
+                    // 3. Update Intelligence panel
+                    updateIntelligence(data);
+
+                    // 4. Auto Play Audio Response
+                    if (data.audio_base64) {
+                        const audio = new Audio('data:audio/mp3;base64,' + data.audio_base64);
+                        audio.play();
+                    }
+
+                    micStatus.innerText = 'Click Microphone to speak again...';
+                } catch (err) {
+                    alert('Error: ' + err.message);
+                    micStatus.innerText = 'Error occurred. Click Microphone to retry.';
+                }
+            };
+        }
+
+        async function sendTextMessage() {
+            const textInput = document.getElementById('textInput');
+            const message = textInput.value.trim();
+            if (!message) return;
+
+            const phone = document.getElementById('clientPhone').value;
+            const name = document.getElementById('clientName').value;
+
+            textInput.value = '';
+            appendMessage('user', message, 'Text Input');
+            micStatus.innerText = 'Processing LangGraph Agent response...';
+
+            try {
+                const response = await fetch('/converse', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ client_phone: phone, client_name: name, message: message })
+                });
+
+                const data = await response.json();
+                if (!response.ok) throw new Error(data.detail || 'API Error');
+
+                appendMessage('agent', data.response, `Intent: ${data.intent || 'N/A'}`);
+                updateIntelligence(data);
+                micStatus.innerText = 'Click Microphone to speak in UrduLish...';
+            } catch (err) {
+                alert('Error: ' + err.message);
+            }
+        }
+
+        function appendMessage(sender, text, meta) {
+            const msgDiv = document.createElement('div');
+            msgDiv.className = `message ${sender}`;
+
+            const avatarText = sender === 'user' ? 'U' : 'A';
+            msgDiv.innerHTML = `
+                <div class="avatar">${avatarText}</div>
+                <div class="msg-bubble">
+                    ${text}
+                    <div class="msg-meta"><span>${meta}</span></div>
+                </div>
+            `;
+            chatBox.appendChild(msgDiv);
+            chatBox.scrollTop = chatBox.scrollHeight;
+        }
+
+        function updateIntelligence(data) {
+            if (data.intent) {
+                intentTags.innerHTML = `<span class="tag intent">${data.intent}</span>`;
+            }
+            if (data.missing_slots) {
+                slotTags.innerHTML = data.missing_slots.length > 0 
+                    ? data.missing_slots.map(s => `<span class="tag">Missing: ${s}</span>`).join('')
+                    : `<span class="tag">All slots collected</span>`;
+            }
+        }
+    </script>
+</body>
+</html>
