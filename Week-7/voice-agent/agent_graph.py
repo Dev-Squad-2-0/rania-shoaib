@@ -56,7 +56,18 @@ from openai import RateLimitError, APIError, APITimeoutError
 # clarification turn instead of calling the tool with a None.
 REQUIRED_SLOTS = {
     "book": ["property_name", "date", "start_time", "end_time"],
-    "reschedule": ["event_id", "new_date", "new_start", "new_end"],
+    # BUG FIX: event_id used to be hard-required here, with CRM lookup only
+    # attempted when the message happened to contain a narrow set of trigger
+    # phrases ("abhi", "pichli", "reschedule", etc). A caller who just said
+    # "apni visit ka time change karna hai" — no trigger phrase, completely
+    # normal thing to say — skipped the lookup entirely and got asked to
+    # recite a booking reference number, which a real client never has
+    # memorized. Reschedule should degrade the same way cancel already
+    # does: ask for what the customer wants to change TO (new date/time),
+    # resolve event_id from their booking history behind the scenes, and
+    # only ask which property as a natural follow-up if that resolution is
+    # ambiguous — never lead with "give me your reference number."
+    "reschedule": ["new_date", "new_start", "new_end"],
     # Cancellation should be speakable in natural terms first: property,
     # date, and time. event_id is resolved from the client's own booking
     # history when possible, and only asked for as a fallback if the lookup
@@ -295,11 +306,22 @@ INTENT_SYSTEM_PROMPT = """Classify the customer's message into exactly one inten
 Respond with ONLY the single word, no other text:
 greeting, query, book, reschedule, cancel, seller, complaint, goodbye
 
-- "query" = asking about properties, prices, availability, general questions
-- "book" = wants to schedule a new visit/appointment. This includes any phrasing
-  that means "I want an appointment/visit," even without the word "book" —
-  e.g. "appointment lena hai", "visit karni hai", "mujhe dikhana hai property",
-  "kal aa sakte hain kya" — these are all "book", not "query".
+- "query" = asking about properties, prices, availability, general questions.
+  This includes wanting to see/buy/get a property in general — "plot lena
+  hai", "ghar chahiye", "apartment dikhayen" are all "query", NOT "book",
+  even though they contain words like "lena hai"/"chahiye" that sound similar
+  to booking phrasing. The word "lena hai" alone just means "want to get/buy
+  X" and is not a scheduling signal on its own.
+- "book" = wants to SCHEDULE a specific visit/meeting — the signal is an
+  actual scheduling intent: a day/time reference ("kal", "parson", a
+  specific time), or an explicit ask to visit/meet/see IN PERSON, or the
+  word "book"/"appointment" itself paired with wanting to go. Examples:
+  - "appointment lena hai kal ke liye" -> book (has "kal", a time reference)
+  - "is property ki visit book karwani hai" -> book (explicit "book")
+  - "Bahria Town mein plot lena hai 1 crore ke andar" -> query (just wants to
+    see/buy a plot — no scheduling signal at all)
+  - "Gulberg mein apartment dikhayen" -> query (wants to see listings, not a
+    scheduled in-person visit)
 - "reschedule" = wants to change an existing appointment's time
 - "cancel" = wants to cancel an existing appointment
 - "seller" = wants to list or sell a property, publish a listing, or ask about seller-side help
@@ -434,7 +456,7 @@ def intent_detection_node(state: GraphState) -> dict:
         criteria = extract_criteria(message)
         has_property_criteria = any(
             criteria.get(k) not in (None, "", [], {})
-            for k in ("budget", "city", "area", "bedrooms", "purpose", "amenities", "investment_goals")
+            for k in ("budget", "bedrooms", "purpose", "amenities", "investment_goals")
         )
         if has_property_criteria:
             extracted_slots = extract_appointment_slots(message)
@@ -621,15 +643,20 @@ def booking_node(state: GraphState) -> dict:
     response = (
         f"Aap ki visit {details.get('date')} ko {details.get('start_time')} baje ke liye book ho gayi hai."
         if result.get("success")
-        else "Sorry, booking abhi complete nahi ho saki. Mein isko manually check karwa deti hoon, aur aapko confirm kar deti hoon."
+        else "Sorry, booking abhi complete nahi ho saci. Mein isko manually check karwa deti hoon, aur aapko confirm kar deti hoon."
     )
-    # A successful booking completes what the caller came here to do — end
-    # the conversation so session_state clears and the next call starts
-    # fresh. A failure keeps the session open so they can retry without
-    # re-supplying everything (event_id, property, etc. stay filled).
+    # BUG FIX: previously ended conversation on success, clearing session_state.
+    # This meant a same-call reschedule lost client_id and event_id, so the
+    # CRM lookup in slot_filling_node found nothing and reschedule silently
+    # failed. Only goodbye_node should end the session now.
+    # Also persist event_id into appointment_details for same-call reschedule.
+    updated_details = dict(details)
+    if result.get("success") and result.get("event_id"):
+        updated_details["event_id"] = result["event_id"]
     return {
         "tool_outputs": tool_outputs, "appointment_status": status, "response": response,
-        "conversation_ended": bool(result.get("success")), "pending_question": None,
+        "appointment_details": updated_details,
+        "conversation_ended": False, "pending_question": None,
     }
 
 
@@ -666,9 +693,15 @@ def reschedule_node(state: GraphState) -> dict:
         f"Aap ki visit {details.get('new_date')} ko {details.get('new_start')} baje ke liye reschedule ho gayi hai."
         if result.get("success") else "Sorry, reschedule abhi complete nahi ho saka. Mein isko manually check karwa deti hoon, aur aapko confirm kar deti hoon."
     )
+    # BUG FIX: same as booking_node — don't end session so caller can cancel
+    # or ask questions after rescheduling in the same call.
+    updated_details = dict(details)
+    if result.get("success") and result.get("event_id"):
+        updated_details["event_id"] = result["event_id"]
     return {
         "tool_outputs": tool_outputs, "appointment_status": status, "response": response,
-        "conversation_ended": bool(result.get("success")), "pending_question": None,
+        "appointment_details": updated_details,
+        "conversation_ended": False, "pending_question": None,
     }
 
 
@@ -752,7 +785,7 @@ def email_node(state: GraphState) -> dict:
     """
     # BUG FIX: appointment_manager now fires the notification email
     # asynchronously (see appointment_manager._send_email_async) so a slow
-    # SMTP send can't block the spoken response — which means "email_sent"
+    # SMTP send can't blaock the spoken response — which means "email_sent"
     # is no longer known at this point in the turn, it's just been kicked
     # off. Say something that's true regardless of timing rather than
     # asserting delivery that hasn't necessarily happened yet.
@@ -814,16 +847,110 @@ Today's reference date is: {today}
 """
 
 
+# Relative-date terms the LLM (especially smaller/faster models like
+# llama-3.1-8b) reliably fails to resolve — it passes them through
+# literally ("aaj", "kal") instead of converting to YYYY-MM-DD, which
+# then hits Google Calendar as a bad timeMin/timeMax and returns 400.
+# Resolve these deterministically in Python AFTER the LLM extraction so
+# the LLM never has to get date arithmetic right.
+_RELATIVE_DATE_MAP = {
+    # Roman Urdu
+    "aaj": 0, "aj": 0,
+    "kal": 1, "kall": 1,
+    "parson": 2, "parson ko": 2,
+    # English
+    "today": 0,
+    "tomorrow": 1,
+    "day after tomorrow": 2,
+    # Urdu script (common STT outputs)
+    "آج": 0,
+    "کل": 1,
+    "پرسوں": 2,
+}
+
+_WEEKDAY_NAMES = {
+    "monday": 0, "somaar": 0, "پیر": 0,
+    "tuesday": 1, "mangal": 1, "منگل": 1,
+    "wednesday": 2, "budh": 2, "بدھ": 2,
+    "thursday": 3, "jumeraat": 3, "جمعرات": 3,
+    "friday": 4, "juma": 4, "جمعہ": 4,
+    "saturday": 5, "hafta": 5, "ہفتہ": 5,
+    "sunday": 6, "itwar": 6, "اتوار": 6,
+}
+
+
+def _resolve_date(raw: str) -> str:
+    """
+    Converts whatever the LLM put in the date field to a real YYYY-MM-DD.
+    If it's already a valid YYYY-MM-DD, returns it unchanged.
+    If it's a relative term (aaj/kal/parson/today/tomorrow), resolves it.
+    If it's a weekday name, finds the next occurrence.
+    Otherwise returns the raw value so the caller can decide what to do.
+    """
+    if not raw:
+        return raw
+    raw_stripped = raw.strip()
+
+    # Already a valid date — pass through
+    try:
+        datetime.date.fromisoformat(raw_stripped)
+        return raw_stripped
+    except ValueError:
+        pass
+
+    today = datetime.date.today()
+    lower = raw_stripped.lower()
+
+    # Relative offset
+    for term, offset in _RELATIVE_DATE_MAP.items():
+        if lower == term or lower.startswith(term + " "):
+            return (today + datetime.timedelta(days=offset)).isoformat()
+
+    # Weekday name — find next occurrence
+    for name, weekday in _WEEKDAY_NAMES.items():
+        if name in lower:
+            days_ahead = (weekday - today.weekday()) % 7
+            if days_ahead == 0:
+                days_ahead = 7  # "next Monday" when today is Monday = next week
+            return (today + datetime.timedelta(days=days_ahead)).isoformat()
+
+    # Numeric date patterns like "20 august", "20/08", "20-08-2026"
+    import re as _re
+    month_names = {
+        "jan": 1, "feb": 2, "mar": 3, "apr": 4, "may": 5, "jun": 6,
+        "jul": 7, "aug": 8, "sep": 9, "oct": 10, "nov": 11, "dec": 12,
+        "january": 1, "february": 2, "march": 3, "april": 4, "june": 6,
+        "july": 7, "august": 8, "september": 9, "october": 10, "november": 11, "december": 12,
+        # Urdu month names
+        "جنوری": 1, "فروری": 2, "مارچ": 3, "اپریل": 4, "مئی": 5, "جون": 6,
+        "جولائی": 7, "اگست": 8, "ستمبر": 9, "اکتوبر": 10, "نومبر": 11, "دسمبر": 12,
+    }
+    # "20 august" / "20 aug" / "20 اگست"
+    m = _re.search(r"(\d{1,2})\s+([a-zA-Z\u0600-\u06ff]+)", lower)
+    if m:
+        day = int(m.group(1))
+        mon_str = m.group(2).strip()
+        month = month_names.get(mon_str)
+        if month:
+            year = today.year if (month > today.month or (month == today.month and day >= today.day)) else today.year + 1
+            try:
+                return datetime.date(year, month, day).isoformat()
+            except ValueError:
+                pass
+
+    # Give up — return a sentinel so slot_filling_node knows this date
+    # couldn't be parsed and should ask the caller to repeat it clearly,
+    # rather than passing garbage to Google Calendar.
+    return None
+
+
 def extract_appointment_slots(message: str) -> dict:
     """
-    LLM-based extraction of booking fields from free text, the booking
-    equivalent of query_agent.extract_criteria() for property search.
-    Returns only the keys the model actually found (nulls/empties dropped),
-    using generic field names — slot_filling_node maps these onto the
-    intent-specific keys REQUIRED_SLOTS expects via FIELD_MAP_BY_INTENT.
-    Never raises: a parse failure or API error just yields no extraction,
-    so the turn falls through to the existing clarifying-question flow
-    instead of crashing the graph.
+    LLM-based extraction of booking fields from free text.
+    Date resolution is done deterministically in Python after the LLM
+    extraction — small/fast LLMs (llama-3.1-8b etc.) reliably fail to
+    convert "aaj"/"kal" to YYYY-MM-DD, passing them through literally
+    and causing Google Calendar 400 Bad Request errors.
     """
     today = datetime.date.today().isoformat()
     try:
@@ -842,7 +969,23 @@ def extract_appointment_slots(message: str) -> dict:
         print(f"[slot_extraction] WARNING: extraction failed, continuing with no new fields: {e}")
         parsed = {}
 
-    return {k: v for k, v in parsed.items() if v not in (None, "", "null")}
+    result = {k: v for k, v in parsed.items() if v not in (None, "", "null")}
+
+    # Post-process: deterministically resolve relative date terms the LLM
+    # may have passed through literally instead of converting.
+    # If resolution fails (STT garbled the date beyond recognition),
+    # drop the field entirely so slot_filling_node asks for clarification
+    # instead of passing garbage to Google Calendar.
+    for date_key in ("date", "new_date"):
+        if date_key in result:
+            resolved = _resolve_date(result[date_key])
+            if resolved:
+                result[date_key] = resolved
+            else:
+                print(f"[slot_extraction] Could not resolve date '{result[date_key]}' — dropping field, will ask caller")
+                del result[date_key]
+
+    return result
 
 
 @log_transition("slot_filling")
@@ -898,20 +1041,41 @@ def slot_filling_node(state: GraphState) -> dict:
         details["employee_name"] = emp["name"]
         details["employee_email"] = emp["email"]
 
-    # Reschedule flow: if the caller means the booking they just made, use
-    # the latest successful appointment so we can ask for the new date/time
-    # instead of forcing them to repeat the old booking reference.
+    # Reschedule flow: resolve the booking from the caller's own history
+    # the same way cancel already does — try a property-name match first,
+    # then fall back to their single most recent active booking. BUG FIX:
+    # this fallback used to only fire when the message happened to contain
+    # one of a narrow set of trigger phrases ("abhi", "pichli",
+    # "reschedule", etc) — a caller who just said "apni visit ka time
+    # change karna hai" (completely ordinary phrasing, no trigger word)
+    # skipped this entirely and got asked to recite a booking reference
+    # number outright, which a real client never has memorized. Always
+    # attempt the lookup regardless of exact wording; asking for a
+    # reference number is now a last resort, not the first move.
     if intent == "reschedule" and not details.get("event_id"):
         client_id = state.get("user_profile", {}).get("client_id")
-        recent_message = message.lower()
-        if client_id and any(phrase in recent_message for phrase in ("isko", "is ko", "jo abhi", "abhi", "pichli", "previous", "purani", "this", "the one", "recent", "last one", "reschedule kar", "reschedule")):
+        if client_id and details.get("property_name"):
+            existing = crm_store.get_appointment_by_client_details(
+                client_id=client_id,
+                property_title=details.get("property_name"),
+            )
+            if existing:
+                details.setdefault("event_id", existing.get("event_id"))
+                details.setdefault("property_name", existing.get("property_title"))
+                details.setdefault("old_date", existing.get("date"))
+                details.setdefault("old_start", existing.get("start_time"))
+                details.setdefault("old_end", existing.get("end_time"))
+                details.setdefault("employee_name", existing.get("employee"))
+                details.setdefault("employee_email", existing.get("employee_email"))
+
+        if client_id and not details.get("event_id"):
             latest = crm_store.get_latest_appointment_for_client(client_id)
             if latest:
                 details.setdefault("event_id", latest.get("event_id"))
                 details.setdefault("property_name", latest.get("property_title"))
-                details.setdefault("date", latest.get("date"))
-                details.setdefault("start_time", latest.get("start_time"))
-                details.setdefault("end_time", latest.get("end_time"))
+                details.setdefault("old_date", latest.get("date"))
+                details.setdefault("old_start", latest.get("start_time"))
+                details.setdefault("old_end", latest.get("end_time"))
                 details.setdefault("employee_name", latest.get("employee"))
                 details.setdefault("employee_email", latest.get("employee_email"))
 
@@ -937,23 +1101,36 @@ def slot_filling_node(state: GraphState) -> dict:
                 details.setdefault("employee_name", existing.get("employee"))
                 details.setdefault("employee_email", existing.get("employee_email"))
 
-        # If the caller is referring to "the one I just booked" and didn't
-        # repeat the booking details, fall back to the most recent booking
-        # for this client. This is the common immediate-cancel case from the
-        # UI transcript and keeps the agent from asking for details it should
-        # already know from the latest appointment row.
+        # BUG FIX: this used to only fire on a narrow set of trigger
+        # phrases ("abhi", "pichli", etc) — same issue as reschedule above.
+        # Always attempt the fallback; a client with exactly one active
+        # booking shouldn't need to say a magic word to have it found.
         if client_id and not details.get("event_id"):
-            recent_message = message.lower()
-            if any(phrase in recent_message for phrase in ("abhi", "just booked", "jo abhi", "pichli", "previous", "purani", "recent", "last one", "jo abhi book")):
-                latest = crm_store.get_latest_appointment_for_client(client_id)
-                if latest:
-                    details.setdefault("event_id", latest.get("event_id"))
-                    details.setdefault("property_name", latest.get("property_title"))
-                    details.setdefault("date", latest.get("date"))
-                    details.setdefault("start_time", latest.get("start_time"))
-                    details.setdefault("end_time", latest.get("end_time"))
-                    details.setdefault("employee_name", latest.get("employee"))
-                    details.setdefault("employee_email", latest.get("employee_email"))
+            latest = crm_store.get_latest_appointment_for_client(client_id)
+            if latest:
+                details.setdefault("event_id", latest.get("event_id"))
+                details.setdefault("property_name", latest.get("property_title"))
+                details.setdefault("date", latest.get("date"))
+                details.setdefault("start_time", latest.get("start_time"))
+                details.setdefault("end_time", latest.get("end_time"))
+                details.setdefault("employee_name", latest.get("employee"))
+                details.setdefault("employee_email", latest.get("employee_email"))
+
+    if intent == "reschedule" and not details.get("event_id"):
+        # Couldn't resolve automatically (no active booking on file, or
+        # more than one and no property name given to disambiguate) — ask
+        # naturally which property, exactly mirroring cancel's fallback
+        # below. A reference number is never the first thing asked for.
+        lookup_question = (
+            "Zaroor! Yeh reschedule kis property ki visit ke liye hai? "
+            "Property ka naam bata dein, phir main aapki booking dhoondh leti hoon."
+        )
+        return {
+            "appointment_details": details,
+            "missing_slots": [f for f in ("property_name",) if not details.get(f)] or ["property_name"],
+            "response": lookup_question,
+            "pending_question": lookup_question,
+        }
 
     if intent == "cancel" and not details.get("event_id"):
         lookup_question = (
@@ -1009,7 +1186,12 @@ def availability_check_node(state: GraphState) -> dict:
         # Shouldn't happen if slot_filling ran first, but don't crash if it does
         return {"missing_slots": [date_field, start_field, end_field]}
 
-    result = calendar_tool.check_availability(date, start, end)
+    # BUG FIX: during reschedule, the old event is still on the calendar,
+    # so any time slot near it shows as "busy" — the availability check
+    # conflicts with the event being rescheduled itself. Pass the existing
+    # event_id so calendar_tool can exclude it from the conflict check.
+    existing_event_id = state.get("appointment_details", {}).get("event_id") if intent == "reschedule" else None
+    result = calendar_tool.check_availability(date, start, end, exclude_event_id=existing_event_id)
 
     tool_outputs = dict(state.get("tool_outputs", {}))
     tool_outputs["availability"] = result

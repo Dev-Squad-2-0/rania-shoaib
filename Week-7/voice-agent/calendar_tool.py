@@ -59,12 +59,18 @@ def _execute_with_retry(request):
     return request.execute()
 
 
-def check_availability(date: str, start_time: str, end_time: str) -> dict:
+def check_availability(date: str, start_time: str, end_time: str, exclude_event_id: str = None) -> dict:
     """
     Returns {"available": bool, "conflicting_events": [...]} on success,
     {"available": None, "error": str} if the check itself failed even
     after retries — callers should treat available=None as "unknown,
     don't confirm a slot" rather than assuming free.
+
+    exclude_event_id: when rescheduling, pass the existing event's ID so
+    it isn't counted as a conflict against itself. Without this, every
+    proposed new time for a reschedule would conflict with the old booking
+    still sitting on the calendar, making it impossible to reschedule to
+    any nearby slot.
     """
     try:
         service = _get_service()
@@ -80,6 +86,13 @@ def check_availability(date: str, start_time: str, end_time: str) -> dict:
         )
         events_result = _execute_with_retry(request)
         events = events_result.get("items", [])
+
+        # BUG FIX: during a reschedule the old event is still on the calendar,
+        # so it always showed up as a conflict against itself — making every
+        # proposed new time fail availability check. Filter it out by event ID.
+        if exclude_event_id:
+            events = [e for e in events if e.get("id") != exclude_event_id]
+
         conflicting = [e.get("summary", "(no title)") for e in events]
         return {"available": len(conflicting) == 0, "conflicting_events": conflicting}
     except Exception as e:

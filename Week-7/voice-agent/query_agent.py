@@ -61,10 +61,22 @@ def _call_llm_with_retry(**kwargs):
 # ---------------------------------------------------------------
 # 1. SLOT EXTRACTION — natural language -> structured criteria
 # ---------------------------------------------------------------
-EXTRACTION_SYSTEM_PROMPT = """You extract structured property search criteria from a customer's message (which may be in English, Roman Urdu, or Urdu Arabic script from STT).
+# These are the ONLY valid values the DB knows about.
+# The extraction LLM must snap to one of these — never invent a new spelling.
+KNOWN_CITIES = ["Karachi", "Lahore", "Islamabad", "Rawalpindi", "Faisalabad"]
+KNOWN_AREAS  = [
+    "DHA Phase 6", "DHA Phase 2",
+    "Bahria Town Phase 8", "Bahria Town Precinct 10",
+    "Clifton Block 5",
+    "Gulberg III",
+    "Johar Town",
+    "F-10 Markaz",
+]
+
+EXTRACTION_SYSTEM_PROMPT = """You extract structured property search criteria from a customer's message (which may be in English, Roman Urdu, or Urdu Arabic script from STT — speech-to-text output is often phonetically approximate).
 
 Respond with ONLY a JSON object, no other text, no markdown fences. Use this exact shape:
-{
+{{
   "budget": number or null,
   "city": string or null,
   "area": string or null,
@@ -73,19 +85,82 @@ Respond with ONLY a JSON object, no other text, no markdown fences. Use this exa
   "property_category": "residential" or "commercial" or null,
   "amenities": [list of strings] or [],
   "investment_goals": string or null
-}
+}}
 
-Rules for Extraction & Urdu Transcripts:
-- budget: convert numbers in any script or words ("crore"/"lakh"/"karod"/"lac"/"سکستو سیون کروڑ"/"چھ سے سات کروڑ"/"6 to 7 crore") to a plain PKR number (e.g., "6 to 7 crore" or "سکستو سیون کروڑ" -> 70000000; "3 crore" -> 30000000).
-- city/area: translate/normalize location names (e.g., "بحریہ ٹاؤن" / "bahria" -> area: "Bahria Town"; "ڈی ایچ اے" / "dha" -> area: "DHA"; "گلبرگ" / "gulberg" -> area: "Gulberg III"; "کلفٹن" / "clifton" -> area: "Clifton"; "ماڈل ٹاؤن" / "model town" -> area: "Model Town"; "اسلام آباد" -> city: "Islamabad"; "کراچی" -> city: "Karachi"; "لاہور" -> city: "Lahore").
-- bedrooms: extract numbers ("چار بیڈ" -> 4; "تھری بیڈ" -> 3; "2 bed" -> 2).
-- purpose: "buy" for purchasing/buy/buying/چاہیے, "rent" for rent/کیراے۔
-- property_category: infer from the kind of property named, even if the customer never says "residential" or "commercial" outright.
-  "residential" for house/ghar/apartment/فلیٹ/villa/ولا/bungalow/مکان/flat/kamra-based homes.
-  "commercial" for shop/دکان/office/دفتر/plaza/commercial space/godown.
-  Leave null if the customer only gave a location/budget with no property type at all (e.g. "Bahria Town mein kuch dikha den") — don't guess.
-- Only fill a field if the customer actually expressed a matching preference. Leave unmatched fields null.
-"""
+CRITICAL — city and area MUST be chosen from the canonical lists below.
+STT often mis-transcribes Urdu place names (e.g. "جوہر ٹاؤن" may come out as
+"Joher Town", "Juhar Town", "Yohar Town" etc.). Your job is to figure out
+which canonical name the customer MEANT and output that exact spelling.
+If nothing in the list is a plausible match, output null — never invent a spelling.
+
+VALID CITIES (output one of these exactly, or null):
+{cities}
+
+VALID AREAS (output one of these exactly, or null):
+{areas}
+
+Rules:
+- budget: convert any script/words to plain PKR integer.
+  ("3 crore" -> 30000000, "85 lakh" -> 8500000, "6 to 7 crore" -> 70000000)
+- city: pick the closest match from VALID CITIES using your knowledge of
+  Pakistani geography and common STT errors. E.g.:
+  "لاہور" / "lahor" / "lahore city" -> "Lahore"
+  "اسلام آباد" / "islambad" / "islamabad" -> "Islamabad"
+  "کراچی" / "krachi" / "karachi" -> "Karachi"
+  "راولپنڈی" / "rawlpindi" -> "Rawalpindi"
+  "فیصل آباد" / "faisal abad" -> "Faisalabad"
+- area: pick the closest match from VALID AREAS. E.g.:
+  "جوہر ٹاؤن" / "joher town" / "juhar" / "yohar town" -> "Johar Town"
+  "بحریہ ٹاؤن" / "bahriya" / "bahria" -> best matching Bahria Town entry
+  "ڈی ایچ اے" / "dha" / "dia phase 6" -> best matching DHA entry
+  "گلبرگ" / "gulburg" / "gulberg" -> "Gulberg III"
+  "کلفٹن" / "clifton" -> "Clifton Block 5"
+  "ایف ٹین" / "f10" / "f 10" -> "F-10 Markaz"
+- bedrooms: extract numbers ("چار بیڈ"->4, "تھری بیڈ"->3, "2 bed"->2).
+- purpose: "buy" for purchasing/خریدنا/چاہیے (ownership context),
+           "rent" for kiraya/کرایہ/rent pe lena.
+- property_category:
+  "residential" for house/ghar/apartment/فلیٹ/villa/bungalow/مکان.
+  "commercial" for shop/دکان/office/دفتر/plaza/godown.
+  null if only location/budget given with no property type.
+- Only fill a field if the customer actually expressed that preference. Leave others null.
+""".format(
+    cities="\n".join(f"  - {c}" for c in KNOWN_CITIES),
+    areas="\n".join(f"  - {a}" for a in KNOWN_AREAS),
+)
+
+
+def _fuzzy_snap(value: str, candidates: list[str]) -> str | None:
+    """
+    Post-extraction safety net: if the LLM output a place name that isn't an
+    exact match for any canonical value, find the closest one by character
+    overlap and return it — as long as it's a convincing match (>50% of the
+    shorter string's characters appear in the longer one in order).
+    Returns None if nothing is close enough, so the caller can leave the
+    field null rather than guess wrongly.
+    """
+    if not value:
+        return None
+    v = value.lower().strip()
+    # Exact match first (case-insensitive)
+    for c in candidates:
+        if c.lower() == v:
+            return c
+    # Substring match: candidate contained in value or vice versa
+    for c in candidates:
+        c_low = c.lower()
+        if c_low in v or v in c_low:
+            return c
+    # Token overlap: share majority of words
+    v_tokens = set(v.split())
+    best, best_score = None, 0.0
+    for c in candidates:
+        c_tokens = set(c.lower().split())
+        overlap = len(v_tokens & c_tokens)
+        score = overlap / max(len(v_tokens), len(c_tokens), 1)
+        if score > best_score:
+            best, best_score = c, score
+    return best if best_score >= 0.5 else None
 
 
 def extract_criteria(user_query: str) -> dict:
@@ -110,14 +185,31 @@ def extract_criteria(user_query: str) -> dict:
     try:
         criteria = json.loads(raw)
     except json.JSONDecodeError:
-        # If extraction fails, return all-null criteria rather than crashing —
-        # recommend_properties() with no criteria just returns top properties
-        # unranked, which is a safe fallback, not a silent wrong answer.
         criteria = {
             "budget": None, "city": None, "area": None, "bedrooms": None,
             "purpose": None, "property_category": None, "amenities": [], "investment_goals": None,
         }
         criteria["_extraction_error"] = raw
+
+    # Post-extraction fuzzy snap: if the LLM produced a city/area that isn't
+    # in the canonical list (e.g. "Joher Town" slipped through), snap it to
+    # the closest valid value. This is a silent correction — the LLM already
+    # did the heavy lifting; this just cleans up edge cases.
+    if criteria.get("city"):
+        snapped = _fuzzy_snap(criteria["city"], KNOWN_CITIES)
+        if snapped:
+            criteria["city"] = snapped
+        else:
+            # Nothing close enough — treat as unknown city so the agent says
+            # "we don't have listings there" rather than searching nationwide.
+            criteria["city"] = criteria["city"]  # leave as-is for no_coverage path
+
+    if criteria.get("area"):
+        snapped = _fuzzy_snap(criteria["area"], KNOWN_AREAS)
+        if snapped:
+            criteria["area"] = snapped
+        # If no snap found, leave the raw value — recommend.py's _normalize_place
+        # alias table is the final fallback.
 
     return criteria
 
@@ -288,9 +380,35 @@ def _render_spoken_answer(user_query: str, matches: list[dict], criteria: dict) 
         ],
     )
     location_part = f"{location_str}" if location_str else ""
-    gap_part = f" Is mein {gap_str} hai." if gap_str else ""
-    if not gap_part:
-        gap_part = ""
+
+    # Build a natural UrduLish caveat only for gaps that matter to the customer,
+    # without ever exposing raw internal field names or English debug strings.
+    caveat_parts = []
+    breakdown = top.get("match_breakdown", {}) or {}
+
+    requested_city = (criteria or {}).get("city")
+    if requested_city and top.get("city") and top["city"].lower() != requested_city.lower():
+        caveat_parts.append(f"yeh {requested_city} mein nahi hai")
+
+    requested_area = (criteria or {}).get("area")
+    if requested_area and top.get("area_name") and requested_area.lower() not in top["area_name"].lower():
+        caveat_parts.append(f"exact area match nahi mila")
+
+    budget = (criteria or {}).get("budget")
+    price_val = top.get("price") or top.get("rent_per_month")
+    if budget and price_val is not None and float(price_val) > budget:
+        caveat_parts.append(f"budget se thoda zyada hai")
+
+    if breakdown.get("type_mismatch"):
+        caveat_parts.append("listing type alag hai")
+
+    amenities_breakdown = breakdown.get("amenities")
+    if isinstance(amenities_breakdown, dict) and amenities_breakdown.get("missing"):
+        missing_str = ", ".join(amenities_breakdown["missing"])
+        caveat_parts.append(f"{missing_str} available nahi")
+
+    gap_part = f" Waise {', aur '.join(caveat_parts)}." if caveat_parts else ""
+
     followup = _stable_variant(
         top.get("title", "") + user_query,
         [

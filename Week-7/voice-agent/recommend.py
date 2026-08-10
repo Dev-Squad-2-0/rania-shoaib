@@ -51,7 +51,30 @@ def _normalize_place(value: str) -> str:
     value = re.sub(r"[,.]", " ", value)
     value = re.sub(r"\b(city|pakistan|punjab|sindh)\b", " ", value)
     value = re.sub(r"\s+", " ", value).strip()
-    return value
+
+    # Phonetic / STT alias table — maps common mis-transcriptions to the
+    # canonical spelling stored in the DB. These run AFTER basic normalization
+    # so the keys can be written in already-lowercased, stripped form.
+    _ALIASES = {
+        "joher town": "johar town",
+        "joher": "johar",
+        "juhar town": "johar town",
+        "juhar": "johar",
+        "bahriya town": "bahria town",
+        "bahriya": "bahria",
+        "islambad": "islamabad",
+        "krachi": "karachi",
+        "lahor": "lahore",
+        "rawlpindi": "rawalpindi",
+        "faisal abad": "faisalabad",
+        "gulburg": "gulberg",
+        "gulberg iii": "gulberg iii",
+        "f 10 markaz": "f-10 markaz",
+        "f10 markaz": "f-10 markaz",
+        "f 10": "f-10 markaz",
+        "f10": "f-10 markaz",
+    }
+    return _ALIASES.get(value, value)
 
 
 def _place_matches(requested: str, actual: str) -> bool:
