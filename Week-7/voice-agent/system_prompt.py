@@ -88,6 +88,9 @@ close near-miss, or nothing at all. Handle each honestly:
   a figure yourself.
 - **Nothing close at all**: say so plainly, the way the GUARDRAILS section
   requires — do not stretch a poor match into a false "close option."
+Never invent a different city, area, or locality when none exists in the retrieved
+match. If the requested city/area has no close option, say that you do not have
+data for it instead of jumping to another city.
 Never present a near-miss as if it were an exact match. The caller must always
 know precisely what's different before you move toward booking a visit.
 

@@ -83,7 +83,8 @@ def check_availability(date: str, start_time: str, end_time: str) -> dict:
         conflicting = [e.get("summary", "(no title)") for e in events]
         return {"available": len(conflicting) == 0, "conflicting_events": conflicting}
     except Exception as e:
-        return {"available": None, "conflicting_events": [], "error": str(e)}
+        error_text = str(e).strip() or repr(e)
+        return {"available": None, "conflicting_events": [], "error": f"{type(e).__name__}: {error_text}"}
 
 
 def create_event(
@@ -125,7 +126,8 @@ def create_event(
             "event_link": created_event.get("htmlLink"),
         }
     except Exception as e:
-        return {"success": False, "error": str(e)}
+        error_text = str(e).strip() or repr(e)
+        return {"success": False, "error": f"{type(e).__name__}: {error_text}"}
 
 
 def update_event(
@@ -172,7 +174,8 @@ def update_event(
         updated = _execute_with_retry(update_request)
         return {"success": True, "event_id": updated.get("id"), "event_link": updated.get("htmlLink")}
     except Exception as e:
-        return {"success": False, "error": str(e)}
+        error_text = str(e).strip() or repr(e)
+        return {"success": False, "error": f"{type(e).__name__}: {error_text}"}
 
 
 def delete_event(event_id: str) -> dict:
@@ -182,7 +185,8 @@ def delete_event(event_id: str) -> dict:
         _execute_with_retry(request)
         return {"success": True}
     except Exception as e:
-        return {"success": False, "error": str(e)}
+        error_text = str(e).strip() or repr(e)
+        return {"success": False, "error": f"{type(e).__name__}: {error_text}"}
 
 
 def _extract_from_description(description: str, key: str) -> str:
@@ -201,22 +205,47 @@ if __name__ == "__main__":
     print(f"\n1. Checking availability on {test_date} 15:00-15:30...")
     availability = check_availability(test_date, "15:00", "15:30")
     print(f"   Available: {availability['available']}")
+    if availability.get("conflicting_events"):
+        print(f"   Conflicting events: {availability['conflicting_events']}")
     if availability.get("error"):
         print(f"   Error: {availability['error']}")
 
-    print(f"\n2. Creating a test event on {test_date} 15:00-15:30...")
-    result = create_event(
-        client_name="Test Client",
-        client_phone="0300-1234567",
-        employee="Ayesha (Test Run)",
-        property_name="DHA Phase 5, Plot 24-C",
-        date=test_date,
-        start_time="15:00",
-        end_time="15:30",
-        meeting_notes="This is a test event created by calendar_tool.py — safe to delete.",
-    )
-    if result["success"]:
-        print(f"   Event created successfully. ID: {result['event_id']}")
-        print(f"   View it here: {result['event_link']}")
+    # BUG FIX: this used to unconditionally create a real test event on
+    # every run of this script, at the same daily slot, and never deleted
+    # it — so repeatedly running this diagnostic (or repeatedly testing
+    # bookings around the same time via the voice agent) silently filled
+    # the calendar with leftover clutter. Eventually every "tomorrow
+    # afternoon"-ish slot genuinely was busy, and check_availability was
+    # reporting that correctly — it looked like a booking-flow bug but was
+    # actually self-inflicted dirty test data. Now: only create the test
+    # event if the slot is actually free, and always clean it up
+    # afterward, so running this script twice in a row leaves the calendar
+    # exactly as it found it.
+    if availability.get("available") is False:
+        print("\n2. Skipping test event creation — slot already has a conflicting "
+              "event (see above). Clean that up first if you want a fresh test.")
     else:
-        print(f"   FAILED: {result['error']}")
+        print(f"\n2. Creating a test event on {test_date} 15:00-15:30...")
+        result = create_event(
+            client_name="Test Client",
+            client_phone="0300-1234567",
+            employee="Ayesha (Test Run)",
+            property_name="DHA Phase 5, Plot 24-C",
+            date=test_date,
+            start_time="15:00",
+            end_time="15:30",
+            meeting_notes="This is a test event created by calendar_tool.py — safe to delete.",
+        )
+        if result["success"]:
+            print(f"   Event created successfully. ID: {result['event_id']}")
+            print(f"   View it here: {result['event_link']}")
+
+            print("\n3. Cleaning up — deleting the test event...")
+            delete_result = delete_event(result["event_id"])
+            if delete_result.get("success"):
+                print("   Test event deleted. Calendar left clean.")
+            else:
+                print(f"   WARNING: couldn't auto-delete test event {result['event_id']}: "
+                      f"{delete_result.get('error')} — delete it manually.")
+        else:
+            print(f"   FAILED: {result['error']}")

@@ -3,3 +3,12 @@
 chroma_store/
 .env
 venv/
+google_service_account.json
+tests/
+*.m4a
+*.wav
+*.mp3
+eval_records/
+hybrid_comparison/
+script_comparison/
+pronunciation_tests/

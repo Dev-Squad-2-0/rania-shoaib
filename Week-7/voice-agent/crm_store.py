@@ -208,35 +208,6 @@ def get_appointment_by_event_id(event_id: str) -> dict:
     with engine.begin() as conn:
         row = conn.execute(
             text("""
-                SELECT property_title, employee, date, start_time, end_time, status
-                FROM appointment_history
-                WHERE event_id = :event_id
-                ORDER BY id DESC
-                LIMIT 1
-            """),
-            {"event_id": event_id},
-        ).fetchone()
-        if not row:
-            return None
-        return {
-            "property_title": row[0], "employee": row[1],
-            "date": row[2], "start_time": row[3], "end_time": row[4], "status": row[5],
-        }
-
-
-def get_appointment_by_event_id(event_id: str) -> dict:
-    """
-    Looks up the most recent appointment_history row for a given
-    event_id (most recent, since a reschedule inserts a new row rather
-    than mutating the old one). Used so cancellation only has to ask the
-    caller for the event_id — property/date/time/employee for the
-    cancel_appointment() call can be pulled from what's already on file
-    instead of making them repeat details the system already knows.
-    Returns None if nothing matches (e.g. a mistyped/stale reference).
-    """
-    with engine.begin() as conn:
-        row = conn.execute(
-            text("""
                 SELECT property_title, employee, employee_email, date, start_time, end_time, status
                 FROM appointment_history
                 WHERE event_id = :event_id
@@ -250,6 +221,152 @@ def get_appointment_by_event_id(event_id: str) -> dict:
         return {
             "property_title": row[0], "employee": row[1], "employee_email": row[2],
             "date": row[3], "start_time": row[4], "end_time": row[5], "status": row[6],
+        }
+
+
+def get_appointment_by_client_details(
+    client_id: int,
+    property_title: str = None,
+    date: str = None,
+    start_time: str = None,
+    end_time: str = None,
+) -> dict:
+    """Looks up the most recent appointment for a client using human-provided
+    details instead of a booking reference number.
+
+    This lets the cancel flow work the way callers naturally speak: property,
+    date, and time first; event_id only as a fallback if the lookup is still
+    ambiguous.
+    """
+    with engine.begin() as conn:
+        # BUG FIX: no status filter meant this could match a leftover
+        # 'failed' attempt (booking_node/reschedule_node/cancellation_node
+        # all log a row with status='failed' and event_id=NULL whenever the
+        # calendar step itself fails) or an already-'cancelled' appointment.
+        # Either one flows straight into cancel_appointment() with a NULL
+        # event_id, which is exactly what produced the raw
+        # "TypeError: Missing required parameter eventId" — this client
+        # never actually had a live, active booking to resolve against.
+        # get_latest_appointment_for_client() already got this right
+        # (status IN ('booked','rescheduled')); this function needs the
+        # same filter for the same reason.
+        clauses = ["client_id = :client_id", "status IN ('booked', 'rescheduled')"]
+        params = {"client_id": client_id}
+
+        if date:
+            clauses.append("date = :date")
+            params["date"] = date
+        if start_time:
+            clauses.append("start_time = :start_time")
+            params["start_time"] = start_time
+        if end_time:
+            clauses.append("end_time = :end_time")
+            params["end_time"] = end_time
+
+        where_clause = " AND ".join(clauses)
+        rows = conn.execute(
+            text(f"""
+                SELECT id, event_id, property_title, employee, employee_email, date, start_time, end_time, status
+                FROM appointment_history
+                WHERE {where_clause}
+                ORDER BY id DESC
+            """),
+            params,
+        ).mappings().all()
+
+        if not rows:
+            return None
+
+        def normalize(value: str) -> str:
+            if not value:
+                return ""
+            lowered = value.lower()
+            for token in ["appointment", "rental", "booking", "visit", "the", "a", "an"]:
+                lowered = lowered.replace(token, " ")
+            return " ".join(lowered.split())
+
+        wanted = normalize(property_title)
+        if wanted:
+            wanted_tokens = {token for token in wanted.split() if len(token) > 2}
+
+            def score(row: dict) -> tuple[int, int]:
+                title = normalize(row["property_title"])
+                title_tokens = set(title.split())
+                overlap = len(wanted_tokens & title_tokens)
+                contains = int(wanted in title or title in wanted)
+                return contains + overlap, row["id"]
+
+            best = max(rows, key=score)
+            best_score, _ = score(best)
+            if best_score > 0:
+                return {
+                    "event_id": best["event_id"],
+                    "property_title": best["property_title"],
+                    "employee": best["employee"],
+                    "employee_email": best["employee_email"],
+                    "date": best["date"],
+                    "start_time": best["start_time"],
+                    "end_time": best["end_time"],
+                    "status": best["status"],
+                }
+
+        # BUG FIX: previously fell through to "just return rows[0]"
+        # unconditionally whenever the property title didn't fuzzy-match
+        # ANY row (best_score == 0 for everything) — which, for a client
+        # with more than one active booking, meant a mistyped or
+        # unrelated property name could silently resolve to a completely
+        # different appointment and cancel/reschedule the wrong one with
+        # no warning. Only auto-resolve without a real title match when
+        # there's genuinely nothing to disambiguate (exactly one active
+        # booking for this client) — otherwise return None so the caller
+        # asks a clarifying question instead of guessing.
+        if len(rows) == 1:
+            best = rows[0]
+            return {
+                "event_id": best["event_id"],
+                "property_title": best["property_title"],
+                "employee": best["employee"],
+                "employee_email": best["employee_email"],
+                "date": best["date"],
+                "start_time": best["start_time"],
+                "end_time": best["end_time"],
+                "status": best["status"],
+            }
+
+        return None
+
+
+def get_latest_appointment_for_client(client_id: int) -> dict:
+    """Returns the most recent non-failed appointment for a client.
+
+    Used as a last-resort cancel fallback when the caller refers to
+    "the one I just booked" or similar wording instead of repeating the
+    booking details.
+    """
+    with engine.begin() as conn:
+        row = conn.execute(
+            text("""
+                SELECT event_id, property_title, employee, employee_email, date, start_time, end_time, status
+                FROM appointment_history
+                WHERE client_id = :client_id AND status IN ('booked', 'rescheduled')
+                ORDER BY id DESC
+                LIMIT 1
+            """),
+            {"client_id": client_id},
+        ).mappings().fetchone()
+
+        if not row:
+            return None
+
+        return {
+            "event_id": row["event_id"],
+            "property_title": row["property_title"],
+            "employee": row["employee"],
+            "employee_email": row["employee_email"],
+            "date": row["date"],
+            "start_time": row["start_time"],
+            "end_time": row["end_time"],
+            "status": row["status"],
         }
 
 
@@ -379,19 +496,47 @@ def mark_reminder_sent(reminder_id: int) -> None:
 # if the voice platform gives us a real call/session id later.
 SESSION_FIELDS = (
     "conversation_history", "user_profile", "property_preferences",
-    "intent", "appointment_details", "missing_slots",
+    "intent", "appointment_details", "missing_slots", "pending_question",
 )
+# NOTE: "response" is deliberately still excluded — it's per-turn scratch,
+# not conversation state. Fixed bug (see agent_graph.py greeting_node /
+# intent_detection_node): intent_detection_node used to read state["response"]
+# to recover "what did we ask the caller last turn", but response is (a)
+# never saved here and (b) unconditionally overwritten by greeting_node on
+# every single turn before intent_detection_node ever runs — so the
+# continuation logic was silently always broken. pending_question is the
+# field that actually survives and is safe to read for that purpose.
+
+# A real phone call won't span this long, so any session older than this
+# is almost certainly an abandoned/forgotten conversation (e.g. a dev left
+# a test mid-flow, or a caller hung up without finishing) rather than a
+# live in-progress one. get_session_state() treats it as if it doesn't
+# exist and deletes it, so the next message starts a clean conversation
+# instead of resuming stale intent/missing_slots from an unrelated session.
+SESSION_TTL_MINUTES = 30
 
 
 def get_session_state(phone: str) -> dict:
     """Returns the saved partial GraphState for this phone, or {} if this
-    is a fresh conversation (no row yet, or the last one was cleared)."""
+    is a fresh conversation (no row yet, the last one was cleared, or it's
+    older than SESSION_TTL_MINUTES and treated as abandoned)."""
     with engine.begin() as conn:
         row = conn.execute(
-            text("SELECT state FROM session_state WHERE phone = :phone"),
+            text("SELECT state, updated_at FROM session_state WHERE phone = :phone"),
             {"phone": phone},
         ).fetchone()
-        return row[0] if row else {}
+        if not row:
+            return {}
+
+        state, updated_at = row[0], row[1]
+        if datetime.utcnow() - updated_at > timedelta(minutes=SESSION_TTL_MINUTES):
+            conn.execute(
+                text("DELETE FROM session_state WHERE phone = :phone"),
+                {"phone": phone},
+            )
+            return {}
+
+        return state
 
 
 def save_session_state(phone: str, state: dict) -> None:

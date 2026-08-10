@@ -89,6 +89,26 @@ class GraphState(TypedDict, total=False):
     # --- What the agent says back this turn ---
     response: str
 
+    # --- The clarifying question currently outstanding, if any ---
+    # Set explicitly by slot_filling_node / availability_check_node whenever
+    # they end the turn on a clarifying question ("kaun si property visit
+    # karni hai?"), and explicitly cleared (None) by every node that ends
+    # the turn with a *final* answer instead (recommendation, rag, booking,
+    # reschedule, cancellation, goodbye, greeting_reply).
+    #
+    # This is deliberately a separate field from `response`: `response` is
+    # per-turn scratch that greeting_node overwrites unconditionally on
+    # every single turn (it's the unconditional graph entry point), so
+    # intent_detection_node can never safely reuse `response` to recover
+    # "what did we just ask the caller" — by the time it runs, greeting_node
+    # has already stomped it. `pending_question` is only ever written by the
+    # nodes that actually ask a clarifying question, so it's safe for
+    # intent_detection_node to read as ground truth for "is this message
+    # answering something we asked last turn". It is one of SESSION_FIELDS
+    # in crm_store.py, so it survives across turns/HTTP requests the same
+    # way missing_slots and appointment_details do.
+    pending_question: Optional[str]
+
     # Internal control flag: set True by the Goodbye node so the caller
     # (whatever drives the graph loop) knows to stop invoking it again.
     conversation_ended: bool

@@ -18,26 +18,50 @@ Run directly for a demo:
     python query_agent.py
 """
 
-import os
 import json
+import re
+import time
 from dotenv import load_dotenv, find_dotenv
-from openai import OpenAI
+from openai import RateLimitError, APIError, APITimeoutError
 
+from system_prompt import SYSTEM_PROMPT
 from recommend import recommend_properties
+from llm_client import client, MODEL as GATEWAY_MODEL
+from price_format import format_pkr_with_raw, format_pkr_delta
 
 load_dotenv(find_dotenv())
 
-GATEWAY_BASE_URL = "https://llm.netixsol.com/v1"
-GATEWAY_API_KEY = os.environ.get("GATEWAY_API_KEY")
-GATEWAY_MODEL = "smart"
 
-client = OpenAI(base_url=GATEWAY_BASE_URL, api_key=GATEWAY_API_KEY)
+def _call_llm_with_retry(**kwargs):
+    """Small retry wrapper for gateway calls.
+
+    Query flows can fan out into multiple LLM calls per turn. A transient
+    429 or timeout should degrade gracefully instead of crashing the whole
+    /converse request with a 500.
+    """
+    last_error = None
+    for attempt in range(1, 4):
+        try:
+            return client.chat.completions.create(**kwargs)
+        except (RateLimitError, APITimeoutError, APIError) as exc:
+            last_error = exc
+            if attempt == 3:
+                raise
+
+            wait_seconds = 5
+            message = str(exc)
+            match = re.search(r"try again in ([\d.]+)s", message)
+            if match:
+                wait_seconds = float(match.group(1)) + 1
+            time.sleep(wait_seconds)
+
+    raise last_error
 
 
 # ---------------------------------------------------------------
 # 1. SLOT EXTRACTION — natural language -> structured criteria
 # ---------------------------------------------------------------
-EXTRACTION_SYSTEM_PROMPT = """You extract structured property search criteria from a customer's message.
+EXTRACTION_SYSTEM_PROMPT = """You extract structured property search criteria from a customer's message (which may be in English, Roman Urdu, or Urdu Arabic script from STT).
 
 Respond with ONLY a JSON object, no other text, no markdown fences. Use this exact shape:
 {
@@ -46,20 +70,27 @@ Respond with ONLY a JSON object, no other text, no markdown fences. Use this exa
   "area": string or null,
   "bedrooms": integer or null,
   "purpose": "buy" or "rent" or null,
+  "property_category": "residential" or "commercial" or null,
   "amenities": [list of strings] or [],
   "investment_goals": string or null
 }
 
-Rules:
-- budget: convert "crore"/"lakh"/"karod"/"lac" to a plain PKR number (1 crore = 10000000, 1 lakh = 100000).
-- Only fill a field if the customer actually said something matching it. Leave everything else null/empty.
-- Do not guess a city or area that wasn't mentioned.
+Rules for Extraction & Urdu Transcripts:
+- budget: convert numbers in any script or words ("crore"/"lakh"/"karod"/"lac"/"سکستو سیون کروڑ"/"چھ سے سات کروڑ"/"6 to 7 crore") to a plain PKR number (e.g., "6 to 7 crore" or "سکستو سیون کروڑ" -> 70000000; "3 crore" -> 30000000).
+- city/area: translate/normalize location names (e.g., "بحریہ ٹاؤن" / "bahria" -> area: "Bahria Town"; "ڈی ایچ اے" / "dha" -> area: "DHA"; "گلبرگ" / "gulberg" -> area: "Gulberg III"; "کلفٹن" / "clifton" -> area: "Clifton"; "ماڈل ٹاؤن" / "model town" -> area: "Model Town"; "اسلام آباد" -> city: "Islamabad"; "کراچی" -> city: "Karachi"; "لاہور" -> city: "Lahore").
+- bedrooms: extract numbers ("چار بیڈ" -> 4; "تھری بیڈ" -> 3; "2 bed" -> 2).
+- purpose: "buy" for purchasing/buy/buying/چاہیے, "rent" for rent/کیراے۔
+- property_category: infer from the kind of property named, even if the customer never says "residential" or "commercial" outright.
+  "residential" for house/ghar/apartment/فلیٹ/villa/ولا/bungalow/مکان/flat/kamra-based homes.
+  "commercial" for shop/دکان/office/دفتر/plaza/commercial space/godown.
+  Leave null if the customer only gave a location/budget with no property type at all (e.g. "Bahria Town mein kuch dikha den") — don't guess.
+- Only fill a field if the customer actually expressed a matching preference. Leave unmatched fields null.
 """
 
 
 def extract_criteria(user_query: str) -> dict:
     """Calls the gateway LLM to turn a natural-language query into structured slots."""
-    response = client.chat.completions.create(
+    response = _call_llm_with_retry(
         model=GATEWAY_MODEL,
         messages=[
             {"role": "system", "content": EXTRACTION_SYSTEM_PROMPT},
@@ -84,7 +115,7 @@ def extract_criteria(user_query: str) -> dict:
         # unranked, which is a safe fallback, not a silent wrong answer.
         criteria = {
             "budget": None, "city": None, "area": None, "bedrooms": None,
-            "purpose": None, "amenities": [], "investment_goals": None,
+            "purpose": None, "property_category": None, "amenities": [], "investment_goals": None,
         }
         criteria["_extraction_error"] = raw
 
@@ -102,6 +133,16 @@ def _format_matches_as_context(matches: list[dict], criteria: dict = None) -> st
     lines = []
     for m in matches:
         price = m.get("price") or m.get("rent_per_month")
+        # BUG FIX: previously the raw PKR integer (e.g. 45000000) was handed
+        # to the LLM and the LLM converted it to crore/lakh itself when
+        # phrasing the spoken answer. It consistently got this wrong by 10x
+        # (dividing by 1,000,000 like "million" instead of 10,000,000 for
+        # "crore") — 45,000,000 PKR (4.5 crore) came out as "45 crore" on
+        # calls. price_format.format_pkr_with_raw() does the conversion
+        # deterministically in Python and hands the LLM both the correct
+        # natural phrasing AND the exact raw figure (for any arithmetic it
+        # needs, like computing an over-budget gap) — see price_format.py.
+        price_str = format_pkr_with_raw(price)
         amenities = m.get("amenities") or []
         amenities_str = ", ".join(amenities) if amenities else "none listed"
 
@@ -109,60 +150,191 @@ def _format_matches_as_context(matches: list[dict], criteria: dict = None) -> st
         gaps = []
         budget = criteria.get("budget")
         if budget and price is not None and float(price) > budget:
-            gaps.append(f"over budget by {float(price) - budget:,.0f} PKR")
+            gaps.append(f"over budget by {format_pkr_delta(float(price) - budget)}")
+
+        requested_city = criteria.get("city")
+        if requested_city and m.get("city") and m["city"].lower() != requested_city.lower():
+            gaps.append(f"not in requested city: {requested_city}")
+
+        requested_area = criteria.get("area")
+        if requested_area and m.get("area_name") and requested_area.lower() not in m["area_name"].lower():
+            gaps.append(f"not in requested area: {requested_area}")
 
         breakdown = m.get("match_breakdown", {})
         amenities_breakdown = breakdown.get("amenities")
         if isinstance(amenities_breakdown, dict) and amenities_breakdown.get("missing"):
             gaps.append(f"missing requested amenities: {', '.join(amenities_breakdown['missing'])}")
 
+        if breakdown.get("type_mismatch"):
+            gaps.append(breakdown["type_mismatch"])
+
         gap_str = f" | GAPS: {'; '.join(gaps)}" if gaps else " | GAPS: none (exact match on stated criteria)"
 
         lines.append(
             f"- {m['title']} | {m['property_type']} | {m['city']}, {m['area_name']} | "
-            f"price: {price} | bedrooms: {m['bedrooms']} | developer: {m['developer']} | "
+            f"price: {price_str} | bedrooms: {m['bedrooms']} | developer: {m['developer']} | "
             f"amenities: {amenities_str} | match_score: {m['match_score']}%{gap_str}"
         )
     return "\n".join(lines)
 
 
-def generate_grounded_answer(user_query: str, matches: list[dict], criteria: dict = None) -> str:
-    """
-    Same voice-safe output rules as rag_pipeline.generate_answer, but the
-    context here is real Postgres rows from recommend_properties(), not
-    Chroma brochure chunks. This is the actual fix for "random" answers.
-    """
-    context = _format_matches_as_context(matches, criteria)
+def _stable_variant(text: str, options: list[str]) -> str:
+    if not options:
+        return ""
+    seed = sum(ord(char) for char in text)
+    return options[seed % len(options)]
 
-    system_prompt = (
-        "You are a real estate assistant speaking to a customer over the phone. "
-        "Answer ONLY using the property listings provided below. Never invent a "
-        "price, location, developer, or bedroom count that isn't in the listings. "
-        "Each listing includes a GAPS field computed directly from the data — use "
-        "it exactly as given, never estimate or round a gap figure yourself.\n\n"
-        "If a listing has 'GAPS: none', present it as an exact match confidently. "
-        "If the best listing has small GAPS (over budget by a modest amount, or "
-        "missing one requested amenity) and nothing better exists, present that "
-        "listing and state its exact gap honestly — do not claim it matches "
-        "perfectly, and do not flatly say nothing matches when a real near-miss "
-        "exists. If nothing close exists at all, say so plainly.\n\n"
-        "STRICT OUTPUT FORMAT — your text is read aloud by text-to-speech:\n"
-        "- Reply ONLY in Roman script (Urdu written in English letters mixed with "
-        "English words). NEVER use Urdu/Nastaliq script.\n"
-        "- NEVER use emojis or symbols.\n"
-        "- Keep sentences short and natural, like a real consultant speaking on a call."
+
+def _summarize_location(match: dict) -> str:
+    city = match.get("city")
+    area = match.get("area_name")
+    if city and area:
+        return f"{city}, {area}"
+    if city:
+        return city
+    if area:
+        return area
+    return ""
+
+
+def _summarize_gaps(match: dict, criteria: dict) -> str:
+    breakdown = match.get("match_breakdown", {}) or {}
+    gaps: list[str] = []
+
+    requested_city = (criteria or {}).get("city")
+    if requested_city and match.get("city") and match["city"].lower() != requested_city.lower():
+        gaps.append(f"requested city not matched: {requested_city}")
+
+    requested_area = (criteria or {}).get("area")
+    if requested_area and match.get("area_name") and requested_area.lower() not in match["area_name"].lower():
+        gaps.append(f"requested area not matched: {requested_area}")
+
+    budget = (criteria or {}).get("budget")
+    price = match.get("price") or match.get("rent_per_month")
+    if budget and price is not None and float(price) > budget:
+        gaps.append(f"over budget by {format_pkr_delta(float(price) - budget)}")
+
+    if breakdown.get("type_mismatch"):
+        gaps.append(breakdown["type_mismatch"])
+
+    amenities_breakdown = breakdown.get("amenities")
+    if isinstance(amenities_breakdown, dict):
+        missing = amenities_breakdown.get("missing") or []
+        if missing:
+            gaps.append(f"missing {', '.join(missing)}")
+
+    return "; ".join(gaps)
+
+
+def _render_spoken_answer(user_query: str, matches: list[dict], criteria: dict) -> str:
+    # BUG FIX: recommend_properties() now returns a single {"no_coverage": True,
+    # "requested_city": ...} sentinel when the requested city has zero listings
+    # anywhere in the DB (not just after other filters narrowed things down).
+    # Previously this case fell through to the generic "no data" line below,
+    # which is honest but vague — or, before the recommend.py fix, silently
+    # substituted a different city's listing entirely. Say plainly, in
+    # UrduLish, that this specific city isn't covered.
+    if len(matches) == 1 and matches[0].get("no_coverage"):
+        city = matches[0].get("requested_city") or ""
+        return _stable_variant(
+            user_query,
+            [
+                f"{city} mein hamare paas abhi listings nahi hain, lekin main aapko is area mein availability aane par batati hoon.",
+                f"{city} ke liye hamare paas abhi koi property available nahi hai. Kya aap kisi doosre city ya area mein dekhna chahengi?",
+            ],
+        )
+
+    if not matches:
+        return _stable_variant(
+            user_query,
+            [
+                "Mere paas is requirement ke liye abhi data nahi hai.",
+                "Is requirement ke liye abhi mere paas data available nahi hai.",
+            ],
+        )
+
+    top = matches[0]
+    price = top.get("price") or top.get("rent_per_month")
+    price_str = format_pkr_with_raw(price)
+    location_str = _summarize_location(top)
+    gap_str = _summarize_gaps(top, criteria)
+    exact_match = not gap_str and top.get("match_score", 0) >= 99.9
+
+    if exact_match:
+        opener = _stable_variant(
+            user_query + top.get("title", ""),
+            ["Jee bilkul", "Achha", "Jee zaroor"],
+        )
+        body_options = [
+            f"aap ke liye yeh option theek hai: {top['title']}",
+            f"yeh option aapki requirement ke kaafi close hai: {top['title']}",
+        ]
+        followups = [
+            "Kya aap iske liye visit schedule karna chahengi?",
+            "Aap chahengi to mein visit ke liye next step bata deti hoon.",
+        ]
+        return f"{opener}, {_stable_variant(top['title'], body_options)}{f', {location_str}' if location_str else ''}, price {price_str}. {_stable_variant(top['title'], followups)}"
+
+    opener = _stable_variant(
+        user_query + top.get("title", ""),
+        ["Jee", "Achha", "Theek hai"],
     )
-
-    user_prompt = f"Property listings:\n{context}\n\nCustomer question: {user_query}"
-
-    response = client.chat.completions.create(
-        model=GATEWAY_MODEL,
-        messages=[
-            {"role": "system", "content": system_prompt},
-            {"role": "user", "content": user_prompt},
+    intro = _stable_variant(
+        user_query + (criteria.get("city") or criteria.get("area") or ""),
+        [
+            "exact match nahi mila, lekin closest option yeh hai",
+            "perfect match nahi mila, lekin sab se qareeb option yeh hai",
+            "aapki requirement ke liye closest option yeh hai",
         ],
     )
-    return response.choices[0].message.content
+    location_part = f"{location_str}" if location_str else ""
+    gap_part = f" Is mein {gap_str} hai." if gap_str else ""
+    if not gap_part:
+        gap_part = ""
+    followup = _stable_variant(
+        top.get("title", "") + user_query,
+        [
+            "Kya aap isko dekhna chahengi?",
+            "Aap chahengi to mein iski visit arrange kar doon?",
+            "Kya mein is option ke liye next step share karun?",
+        ],
+    )
+    pieces = [opener, intro]
+    if top.get("title"):
+        pieces.append(top["title"])
+    if location_part:
+        pieces.append(location_part)
+    pieces.append(f"price {price_str}.")
+    if gap_part:
+        pieces.append(gap_part.strip())
+    pieces.append(followup)
+    return " ".join(piece.strip() for piece in pieces if piece.strip())
+
+
+def _turn_role_and_content(turn) -> tuple[str, str]:
+    """Accept both dict history items and LangChain message objects."""
+    if isinstance(turn, dict):
+        return turn.get("role", "user"), turn.get("content", "")
+
+    role = getattr(turn, "type", None) or getattr(turn, "role", None) or "user"
+    content = getattr(turn, "content", "")
+    return role, content
+
+
+def generate_grounded_answer(
+    user_query: str,
+    matches: list[dict],
+    criteria: dict = None,
+    conversation_history: list[dict] = None,
+) -> str:
+    """
+    Produces a short spoken UrduLish response from grounded matches.
+    The final wording is deterministic so the model cannot invent a city,
+    area, or fallback option that was not actually returned.
+    """
+    return _render_spoken_answer(user_query, matches, criteria or {})
+
+
 
 
 # ---------------------------------------------------------------
@@ -181,6 +353,7 @@ def answer_query(user_query: str, top_n: int = 5) -> dict:
         area=criteria.get("area"),
         bedrooms=criteria.get("bedrooms"),
         purpose=criteria.get("purpose"),
+        property_category=criteria.get("property_category"),
         amenities=criteria.get("amenities") or None,
         investment_goals=criteria.get("investment_goals"),
         top_n=top_n,

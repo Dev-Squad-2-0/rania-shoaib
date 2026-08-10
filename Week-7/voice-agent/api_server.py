@@ -1,11 +1,18 @@
 """
 api_server.py
 Task 4 — HTTP layer n8n actually talks to.
+Task 5 — now also writes into the client-centric CRM store (crm_store.py):
+    clients / call_transcripts / appointment_history / follow_up_reminders
 
 n8n orchestrates via HTTP Request nodes, not Python imports, so this
 wraps query_agent.py and appointment_manager.py as endpoints. Every
-endpoint logs to crm_interactions regardless of success/failure, so
-there's always a record.
+endpoint still logs to crm_interactions (crm.py, Task 4's flat event
+log) regardless of success/failure. On top of that, every endpoint now
+also resolves the caller to a client record and writes the appropriate
+Task 5 rows: a transcript on every call, an appointment_history row on
+every book/reschedule/cancel, and a follow_up_reminders row either way
+(manual follow-up on failure, confirmation reminder on a successful
+booking).
 
 Run:
     uvicorn api_server:app --host 0.0.0.0 --port 8000
@@ -14,17 +21,35 @@ Test in the browser at http://localhost:8000/docs (FastAPI's built-in
 interactive test UI) before pointing n8n at it.
 """
 
-from fastapi import FastAPI
+import os
+import base64
+from fastapi import FastAPI, UploadFile, File, Form, Header, Response, HTTPException
+from fastapi.responses import HTMLResponse, FileResponse
 from pydantic import BaseModel
 from typing import Optional
 
 import crm
+import crm_store
+import stt_service
+import tts_service
 from query_agent import answer_query
 from appointment_manager import book_appointment, reschedule_appointment, cancel_appointment
+from agent_graph import build_graph
 
 crm.ensure_table()
+crm_store.ensure_tables()
 
 app = FastAPI(title="RealEstate Hub Voice Agent API")
+graph_app = build_graph()
+
+
+@app.get("/", response_class=HTMLResponse)
+def read_root():
+    template_path = os.path.join(os.path.dirname(__file__), "templates", "index.html")
+    if os.path.exists(template_path):
+        return FileResponse(template_path)
+    return "<h1>RealEstate Hub Voice Agent API</h1><p>Visit <a href='/docs'>/docs</a> for API interface.</p>"
+
 
 
 # ---------------------------------------------------------------
@@ -40,7 +65,12 @@ class QueryRequest(BaseModel):
 def query_endpoint(req: QueryRequest):
     result = answer_query(req.query)
 
-    top_match = result["matches"][0] if result["matches"] else None
+    # BUG FIX: matches[0] can now be a {"no_coverage": True, ...} sentinel
+    # (see recommend.py) instead of a real property row, which has no
+    # "title" key — use .get() so this doesn't crash on the exact case
+    # it's supposed to be reporting on.
+    raw_top = result["matches"][0] if result["matches"] else None
+    top_match = raw_top if (raw_top and not raw_top.get("no_coverage")) else None
     crm.log_interaction(
         interaction_type="query",
         status="success",
@@ -49,6 +79,21 @@ def query_endpoint(req: QueryRequest):
         property_title=top_match["title"] if top_match else None,
         details={"query": req.query, "extracted_criteria": result["extracted_criteria"]},
     )
+
+    # Task 5: resolve/create the client, fold in anything new we learned
+    # about their preferences, and log this call as a transcript.
+    if req.client_phone:
+        client_id = crm_store.get_or_create_client(req.client_phone, req.client_name)
+        crm_store.update_client_preferences(client_id, result["extracted_criteria"])
+        crm_store.log_call_transcript(
+            client_id=client_id,
+            intent="query",
+            raw_query=req.query,
+            extracted_criteria=result["extracted_criteria"],
+            answer=result["answer"],
+            matches_count=len(result["matches"]),
+        )
+
     return result
 
 
@@ -72,10 +117,11 @@ class BookRequest(BaseModel):
 @app.post("/book")
 def book_endpoint(req: BookRequest):
     result = book_appointment(**req.dict())
+    success = bool(result.get("success"))
 
     crm.log_interaction(
         interaction_type="book",
-        status="success" if result.get("success") else "failed",
+        status="success" if success else "failed",
         client_name=req.client_name,
         client_phone=req.client_phone,
         property_title=req.property_name,
@@ -86,6 +132,27 @@ def book_endpoint(req: BookRequest):
         end_time=req.end_time,
         details={"requirements": req.requirements, "error": result.get("error")},
     )
+
+    # Task 5: client + appointment_history + the appropriate reminder
+    client_id = crm_store.get_or_create_client(req.client_phone, req.client_name)
+    appt_id = crm_store.log_appointment(
+        client_id=client_id,
+        status="booked" if success else "failed",
+        event_id=result.get("event_id"),
+        property_title=req.property_name,
+        employee=req.employee_name,
+        date=req.date,
+        start_time=req.start_time,
+        end_time=req.end_time,
+        details={"requirements": req.requirements, "error": result.get("error")},
+    )
+    if success:
+        crm_store.create_appointment_reminder(client_id, appt_id, req.date)
+    else:
+        crm_store.create_manual_followup(
+            client_id, reason=f"Booking failed: {result.get('error')}", appointment_id=appt_id
+        )
+
     return result
 
 
@@ -112,10 +179,11 @@ class RescheduleRequest(BaseModel):
 @app.post("/reschedule")
 def reschedule_endpoint(req: RescheduleRequest):
     result = reschedule_appointment(**req.dict())
+    success = bool(result.get("success"))
 
     crm.log_interaction(
         interaction_type="reschedule",
-        status="success" if result.get("success") else "failed",
+        status="success" if success else "failed",
         client_name=req.client_name,
         client_phone=req.client_phone,
         property_title=req.property_name,
@@ -126,6 +194,26 @@ def reschedule_endpoint(req: RescheduleRequest):
         end_time=req.new_end,
         details={"old_date": req.old_date, "old_start": req.old_start, "error": result.get("error")},
     )
+
+    client_id = crm_store.get_or_create_client(req.client_phone, req.client_name)
+    appt_id = crm_store.log_appointment(
+        client_id=client_id,
+        status="rescheduled" if success else "failed",
+        event_id=result.get("event_id", req.event_id),
+        property_title=req.property_name,
+        employee=req.employee_name,
+        date=req.new_date,
+        start_time=req.new_start,
+        end_time=req.new_end,
+        details={"old_date": req.old_date, "old_start": req.old_start, "error": result.get("error")},
+    )
+    if success:
+        crm_store.create_appointment_reminder(client_id, appt_id, req.new_date)
+    else:
+        crm_store.create_manual_followup(
+            client_id, reason=f"Reschedule failed: {result.get('error')}", appointment_id=appt_id
+        )
+
     return result
 
 
@@ -148,10 +236,11 @@ class CancelRequest(BaseModel):
 @app.post("/cancel")
 def cancel_endpoint(req: CancelRequest):
     result = cancel_appointment(**req.dict())
+    success = bool(result.get("success"))
 
     crm.log_interaction(
         interaction_type="cancel",
-        status="success" if result.get("success") else "failed",
+        status="success" if success else "failed",
         client_name=req.client_name,
         client_phone=req.client_phone,
         property_title=req.property_name,
@@ -162,9 +251,233 @@ def cancel_endpoint(req: CancelRequest):
         end_time=req.end_time,
         details={"reason": req.reason, "error": result.get("error")},
     )
+
+    client_id = crm_store.get_or_create_client(req.client_phone, req.client_name)
+    appt_id = crm_store.log_appointment(
+        client_id=client_id,
+        status="cancelled" if success else "failed",
+        event_id=req.event_id,
+        property_title=req.property_name,
+        employee=req.employee_name,
+        date=req.date,
+        start_time=req.start_time,
+        end_time=req.end_time,
+        details={"reason": req.reason, "error": result.get("error")},
+    )
+    # A cancellation never gets an appointment reminder (nothing to confirm).
+    # A failed cancellation still needs a human to follow up though.
+    if not success:
+        crm_store.create_manual_followup(
+            client_id, reason=f"Cancellation failed: {result.get('error')}", appointment_id=appt_id
+        )
+
     return result
 
 
 @app.get("/health")
 def health():
     return {"status": "ok"}
+
+
+# ---------------------------------------------------------------
+# /converse — the actual entry point for the voice agent.
+#
+# This is the endpoint n8n should eventually call instead of fanning out
+# to /query /book /reschedule /cancel: it runs the real LangGraph
+# (agent_graph.py), which does intent detection, slot-filling,
+# availability-checking, and CRM/email logging internally, instead of
+# n8n's Switch node routing to a bare tool call with no validation.
+#
+# Session continuity: GraphState fields that need to survive between
+# turns of the same phone call (conversation_history, user_profile,
+# property_preferences, intent, appointment_details, missing_slots) are
+# persisted in crm_store.session_state, keyed by phone. Every request
+# loads whatever's there, merges this turn's message in, invokes the
+# graph, and saves the result back — so a clarifying question asked in
+# turn N ("what date works for you?") gets its answer correctly folded
+# into appointment_details in turn N+1, instead of resetting each call.
+# ---------------------------------------------------------------
+class ConverseRequest(BaseModel):
+    client_phone: str
+    client_name: Optional[str] = None
+    message: str
+
+
+class ConverseResponse(BaseModel):
+    response: str
+    intent: Optional[str] = None
+    missing_slots: list = []
+    conversation_ended: bool = False
+
+
+class ResetSessionRequest(BaseModel):
+    client_phone: str
+
+
+@app.post("/converse/reset")
+def reset_session_endpoint(req: ResetSessionRequest):
+    """
+    Manually clears session_state for a phone number. Session state
+    already auto-expires after crm_store.SESSION_TTL_MINUTES, and a
+    successful book/reschedule/cancel clears it automatically too — this
+    endpoint is for testing, so you can start a clean conversation with
+    the same test phone number without waiting out the TTL or digging
+    into the database directly.
+    """
+    crm_store.clear_session_state(req.client_phone)
+    return {"status": "cleared", "client_phone": req.client_phone}
+
+
+@app.post("/converse", response_model=ConverseResponse)
+def converse_endpoint(req: ConverseRequest):
+    saved = crm_store.get_session_state(req.client_phone)
+
+    state = {
+        "conversation_history": saved.get("conversation_history", []),
+        "current_message": req.message,
+        "user_profile": saved.get("user_profile") or {
+            "phone": req.client_phone, "name": req.client_name,
+        },
+        "property_preferences": saved.get("property_preferences", {}),
+        "intent": saved.get("intent"),
+        "appointment_details": saved.get("appointment_details", {}),
+        "missing_slots": saved.get("missing_slots", []),
+        # BUG FIX: this is the field intent_detection_node relies on to know
+        # "what did we just ask the caller" across turns. It's persisted via
+        # crm_store.SESSION_FIELDS (see crm_store.py), so restore it here the
+        # same way every other cross-turn field is restored.
+        "pending_question": saved.get("pending_question"),
+        "tool_outputs": {},
+    }
+
+    result = graph_app.invoke(state)
+
+    # BUG FIX: conversation_history was being read everywhere (recommendation_
+    # node passes it to generate_grounded_answer for multi-turn phrasing
+    # context) but no node ever wrote to it, so it stayed permanently empty.
+    # Append this turn's exchange here, once, after the graph has produced
+    # its final response, then persist it like every other session field.
+    history = list(state["conversation_history"])
+    history.append({"role": "user", "content": req.message})
+    if result.get("response"):
+        history.append({"role": "assistant", "content": result["response"]})
+    result["conversation_history"] = history
+
+    if result.get("conversation_ended"):
+        crm_store.clear_session_state(req.client_phone)
+    else:
+        crm_store.save_session_state(req.client_phone, result)
+
+    return ConverseResponse(
+        response=result.get("response", ""),
+        intent=result.get("intent"),
+        missing_slots=result.get("missing_slots", []),
+        conversation_ended=bool(result.get("conversation_ended")),
+    )
+
+
+# ---------------------------------------------------------------
+# /voice_converse — End-to-end Voice Entry Point (STT -> LLM Graph -> TTS)
+# ---------------------------------------------------------------
+class VoiceConverseRequest(BaseModel):
+    client_phone: str
+    client_name: Optional[str] = None
+    audio_base64: str  # Base64 encoded input audio
+    content_type: str = "audio/m4a"
+
+
+class VoiceConverseResponse(BaseModel):
+    transcript: str
+    response_text: str
+    intent: Optional[str] = None
+    missing_slots: list = []
+    conversation_ended: bool = False
+    audio_base64: Optional[str] = None  # Base64 encoded output MP3
+    stt_latency_ms: float = 0.0
+    tts_latency_ms: float = 0.0
+
+
+@app.post("/voice_converse", response_model=VoiceConverseResponse)
+def voice_converse_endpoint(req: VoiceConverseRequest):
+    # 1. Decode audio base64 payload
+    try:
+        audio_bytes = base64.b64decode(req.audio_base64)
+    except Exception as e:
+        raise HTTPException(status_code=400, detail=f"Invalid base64 audio string: {e}")
+
+    # 2. STT via Deepgram
+    try:
+        stt_result = stt_service.transcribe_audio(audio_bytes, content_type=req.content_type)
+        transcript = stt_result.get("transcript", "")
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"STT processing failed: {e}")
+
+    if not transcript:
+        transcript = "[Silence / Unclear Audio]"
+        response_text = "Main aap ki baat samajh nahi saki, kya aap dobara keh sakte hain?"
+        # Synthesize fallback TTS
+        tts_result = tts_service.synthesize_speech(response_text)
+        return VoiceConverseResponse(
+            transcript=transcript,
+            response_text=response_text,
+            audio_base64=base64.b64encode(tts_result["audio_bytes"]).decode("utf-8"),
+            stt_latency_ms=stt_result.get("processing_time_ms", 0.0),
+            tts_latency_ms=tts_result.get("total_ms", 0.0),
+        )
+
+    # 3. LangGraph conversation turn
+    converse_req = ConverseRequest(
+        client_phone=req.client_phone,
+        client_name=req.client_name,
+        message=transcript,
+    )
+    conv_resp = converse_endpoint(converse_req)
+
+    # 4. TTS via Fish Audio
+    try:
+        tts_result = tts_service.synthesize_speech(conv_resp.response)
+        audio_out_b64 = base64.b64encode(tts_result["audio_bytes"]).decode("utf-8")
+    except Exception as e:
+        print(f"[api_server] TTS synthesis warning: {e}")
+        audio_out_b64 = None
+        tts_result = {"total_ms": 0.0}
+
+    return VoiceConverseResponse(
+        transcript=transcript,
+        response_text=conv_resp.response,
+        intent=conv_resp.intent,
+        missing_slots=conv_resp.missing_slots,
+        conversation_ended=conv_resp.conversation_ended,
+        audio_base64=audio_out_b64,
+        stt_latency_ms=stt_result.get("processing_time_ms", 0.0),
+        tts_latency_ms=tts_result.get("total_ms", 0.0),
+    )
+
+
+@app.post("/voice_converse_file")
+async def voice_converse_file_endpoint(
+    client_phone: str = Form(...),
+    client_name: Optional[str] = Form(None),
+    file: UploadFile = File(...)
+):
+    """Multipart file upload endpoint for testing directly with audio files."""
+    audio_bytes = await file.read()
+    stt_result = stt_service.transcribe_audio(audio_bytes, content_type=file.content_type or "audio/m4a")
+    transcript = stt_result.get("transcript", "")
+
+    conv_resp = converse_endpoint(
+        ConverseRequest(client_phone=client_phone, client_name=client_name, message=transcript)
+    )
+
+    tts_result = tts_service.synthesize_speech(conv_resp.response)
+
+    return Response(
+        content=tts_result["audio_bytes"],
+        media_type="audio/mpeg",
+        headers={
+            "X-Transcript": transcript,
+            "X-Response-Text": conv_resp.response,
+            "X-Intent": str(conv_resp.intent),
+            "X-Conversation-Ended": str(conv_resp.conversation_ended),
+        }
+    )

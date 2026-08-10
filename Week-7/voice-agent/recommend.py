@@ -16,6 +16,7 @@ ingest_chroma.py) — this reuses Task 3's semantic store rather than
 building a second one.
 """
 
+import re
 from sqlalchemy import create_engine, text
 import chromadb
 from chromadb.utils import embedding_functions
@@ -30,6 +31,36 @@ chroma_client = chromadb.PersistentClient(path=PERSIST_DIR)
 multilingual_ef = embedding_functions.SentenceTransformerEmbeddingFunction(
     model_name="paraphrase-multilingual-MiniLM-L12-v2"
 )
+
+# BUG FIX: extract_criteria() is an LLM call — it isn't guaranteed to hand
+# back a bare city name that matches the DB's `locations.city` column
+# exactly. STT/LLM variance routinely produces "Lahore, Pakistan",
+# "Lahore City", trailing punctuation, etc. City matching used to be a
+# strict `==`, which meant ANY of that variance silently failed to match,
+# fetch_candidates()'s city filter fell through to "search every city",
+# and a Lahore query could come back with a Karachi result that simply
+# scored higher on budget/bedrooms — with nothing telling the caller their
+# stated city was actually dropped. area matching already used substring
+# containment for exactly this reason; city now does the same, via a
+# shared normalizer that strips punctuation/common suffixes so "Lahore,"
+# and "lahore city" both collapse to "lahore" before comparing.
+def _normalize_place(value: str) -> str:
+    if not value:
+        return ""
+    value = value.lower().strip()
+    value = re.sub(r"[,.]", " ", value)
+    value = re.sub(r"\b(city|pakistan|punjab|sindh)\b", " ", value)
+    value = re.sub(r"\s+", " ", value).strip()
+    return value
+
+
+def _place_matches(requested: str, actual: str) -> bool:
+    requested_norm = _normalize_place(requested)
+    actual_norm = _normalize_place(actual)
+    if not requested_norm or not actual_norm:
+        return False
+    return requested_norm in actual_norm or actual_norm in requested_norm
+
 
 # How much each criterion is worth if the user provides it. Only
 # criteria that are actually given are added to the denominator, so a
@@ -56,7 +87,7 @@ def fetch_candidates() -> list[dict]:
     property.
     """
     query = """
-        SELECT p.id, p.title, p.property_type, p.purpose_tag, p.price,
+        SELECT p.id, p.title, p.property_type, p.listing_status, p.purpose_tag, p.price,
                p.rent_per_month, p.area_sqft, p.bedrooms,
                l.area_name, l.city, d.name AS developer,
                COALESCE(array_agg(a.name) FILTER (WHERE a.name IS NOT NULL), '{}') AS amenities
@@ -118,8 +149,29 @@ def score_property(prop: dict, criteria: dict, goal_scores: dict[int, float]) ->
 
     if criteria.get("budget") is not None:
         possible += WEIGHTS["budget"]
-        price = prop["price"] or prop["rent_per_month"]
-        if price is not None:
+        # Compare against the price field that actually matches what this
+        # property IS (a purchase price for a 'buy' listing, a monthly
+        # rent for a 'rent' listing) — never fall back to whichever field
+        # happens to be non-null, since that silently compares a monthly
+        # rent figure against a purchase budget (or vice versa) and
+        # always looks like a huge bargain regardless of fit.
+        if prop["listing_status"] == "buy":
+            price = prop["price"]
+        elif prop["listing_status"] == "rent":
+            price = prop["rent_per_month"]
+        else:
+            price = prop["price"] or prop["rent_per_month"]
+
+        type_mismatch = bool(criteria.get("purpose")) and prop["listing_status"] != criteria["purpose"]
+        if type_mismatch:
+            # Budget isn't a meaningful comparison across listing types —
+            # a "3 crore buy budget" says nothing about whether a rental's
+            # monthly rent is reasonable. Zero this dimension out rather
+            # than let it accidentally inflate the score, and surface the
+            # mismatch so the caller can be told honestly.
+            breakdown["budget"] = 0.0
+            breakdown["type_mismatch"] = f"customer wants to {criteria['purpose']}, this listing is for {prop['listing_status']}"
+        elif price is not None:
             price = float(price)  # Postgres NUMERIC comes back as Decimal; normalize to float
             if price <= criteria["budget"]:
                 points = WEIGHTS["budget"]
@@ -134,13 +186,13 @@ def score_property(prop: dict, criteria: dict, goal_scores: dict[int, float]) ->
 
     if criteria.get("city"):
         possible += WEIGHTS["city"]
-        points = WEIGHTS["city"] if prop["city"].lower() == criteria["city"].lower() else 0.0
+        points = WEIGHTS["city"] if _place_matches(criteria["city"], prop["city"]) else 0.0
         earned += points
         breakdown["city"] = points
 
     if criteria.get("area"):
         possible += WEIGHTS["area"]
-        points = WEIGHTS["area"] if criteria["area"].lower() in prop["area_name"].lower() else 0.0
+        points = WEIGHTS["area"] if _place_matches(criteria["area"], prop["area_name"]) else 0.0
         earned += points
         breakdown["area"] = points
 
@@ -160,7 +212,11 @@ def score_property(prop: dict, criteria: dict, goal_scores: dict[int, float]) ->
 
     if criteria.get("purpose"):
         possible += WEIGHTS["purpose"]
-        points = WEIGHTS["purpose"] if prop["purpose_tag"] == criteria["purpose"] else 0.0
+        # listing_status is the buy/rent column — purpose_tag is a
+        # DIFFERENT column (residential/investment/commercial) and was
+        # being compared here before, which meant this always scored 0
+        # no matter what, silently, for every property.
+        points = WEIGHTS["purpose"] if prop["listing_status"] == criteria["purpose"] else 0.0
         earned += points
         breakdown["purpose"] = points
 
@@ -195,9 +251,14 @@ def score_property(prop: dict, criteria: dict, goal_scores: dict[int, float]) ->
 # ---------------------------------------------------------------
 # 4. MAIN ENTRY POINT
 # ---------------------------------------------------------------
+RESIDENTIAL_TYPES = {"house", "apartment", "villa", "bungalow"}
+COMMERCIAL_TYPES = {"shop", "office", "commercial", "plaza"}
+
+
 def recommend_properties(budget: float = None, city: str = None, area: str = None,
                           bedrooms: int = None, purpose: str = None,
                           amenities: list[str] = None, investment_goals: str = None,
+                          property_category: str = None,
                           top_n: int = 5) -> list[dict]:
     """
     Single entry point the voice agent calls. Fetches all available
@@ -207,9 +268,75 @@ def recommend_properties(budget: float = None, city: str = None, area: str = Non
     criteria = {
         "budget": budget, "city": city, "area": area, "bedrooms": bedrooms,
         "purpose": purpose, "amenities": amenities, "investment_goals": investment_goals,
+        "property_category": property_category,
     }
 
     candidates = fetch_candidates()
+
+    if city:
+        # BUG FIX: was strict `==`, see _place_matches() docstring above —
+        # normalized substring match now so LLM-extracted city variants
+        # ("Lahore, Pakistan" etc.) don't silently fall through to a
+        # nationwide search.
+        city_matched = [c for c in candidates if _place_matches(city, c["city"])]
+        if not city_matched:
+            # No listings anywhere in this city at all (not just after
+            # other filters narrowed things down) — say so plainly instead
+            # of quietly substituting a different city's result. This is
+            # what was happening for Faisalabad, and by exact-match luck
+            # sometimes for Lahore too.
+            return [{
+                "no_coverage": True,
+                "requested_city": city,
+            }]
+        candidates = city_matched
+
+    if area:
+        area_matched = [c for c in candidates if _place_matches(area, c["area_name"])]
+        if area_matched:
+            candidates = area_matched
+
+    if purpose:
+        purpose_matched = [c for c in candidates if c["listing_status"] == purpose]
+        # Buy vs rent is categorical, not a matter of degree — a renter
+        # asking to buy shouldn't have rentals ranked alongside real buy
+        # options. Filter to the requested type first. Only fall back to
+        # the full candidate pool (with the mismatch flagged in scoring
+        # above) if literally nothing of that type exists, so the caller
+        # still gets *something* rather than an empty result.
+        if purpose_matched:
+            candidates = purpose_matched
+
+    if property_category in ("residential", "commercial"):
+        # BUG FIX (rental_01): nothing was filtering residential vs commercial
+        # category at all — bedrooms-based filtering below only kicks in when
+        # the caller states a bedroom count, so "rental apartment" with no
+        # bedroom count could still surface a commercial shop purely because
+        # it scored well on budget/city. Category is categorical like
+        # buy/rent, not a matter of degree, so this is a hard filter (with
+        # the same fallback-to-full-pool safety net as the purpose filter
+        # above, so we still return *something* if nothing of that category
+        # exists).
+        wanted_types = RESIDENTIAL_TYPES if property_category == "residential" else COMMERCIAL_TYPES
+        category_matched = [c for c in candidates if c["property_type"] in wanted_types]
+        if category_matched:
+            candidates = category_matched
+
+    if bedrooms is not None:
+        # Plots and commercial units have no bedroom concept at all
+        # (bedrooms is NULL by design, not "fewer than requested") — if
+        # the customer specifically asked for N bedrooms, they want a
+        # house/apartment, full stop. Without this, a cheap plot with
+        # beds=None can still outscore an actual N-bedroom house purely
+        # on budget, which is a nonsensical recommendation regardless of
+        # how the weighted math works out.
+        bedroom_capable = [c for c in candidates if c["property_type"] in ("house", "apartment")]
+        if bedroom_capable:
+            candidates = bedroom_capable
+
+    if not candidates:
+        return []
+
     goal_scores = investment_goal_scores(investment_goals) if investment_goals else {}
 
     scored = []

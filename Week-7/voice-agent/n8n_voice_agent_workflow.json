@@ -1,5 +1,5 @@
 {
-  "name": "RealEstate Hub Voice Agent - Appointment Automation",
+  "name": "RealEstate Hub Voice Agent - Production LangGraph & Voice Automation",
   "nodes": [
     {
       "parameters": {
@@ -8,171 +8,263 @@
         "responseMode": "responseNode",
         "options": {}
       },
-      "id": "webhook_node",
+      "id": "54d2adfb-64c5-4605-b14b-96d126aadf38",
       "name": "Call Outcome Webhook",
       "type": "n8n-nodes-base.webhook",
       "typeVersion": 2,
-      "position": [-40, 300]
+      "position": [
+        -32,
+        880
+      ],
+      "webhookId": "9b8ad493-de6e-479f-ae4e-b29e491920db"
     },
     {
       "parameters": {
-        "rules": {
-          "values": [
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 1
+          },
+          "conditions": [
             {
-              "conditions": {
-                "options": {"caseSensitive": true, "leftValue": "", "typeValidation": "strict"},
-                "conditions": [
-                  {
-                    "leftValue": "={{$json.intent}}",
-                    "rightValue": "book",
-                    "operator": {"type": "string", "operation": "equals"}
-                  }
-                ],
-                "combinator": "and"
-              },
-              "outputKey": "book"
+              "leftValue": "={{ $json.body.audio_base64 }}",
+              "rightValue": "",
+              "operator": {
+                "type": "string",
+                "operation": "notEmpty"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "a1b2c3d4-switch-audio",
+      "name": "Is Audio Input?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [
+        208,
+        880
+      ]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "http://127.0.0.1:8000/converse",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ { \"client_phone\": $json.body.phone || $json.body.client_phone, \"client_name\": $json.body.client_name, \"message\": $json.body.message } }}",
+        "options": {}
+      },
+      "id": "a1b2c3d4-call-converse",
+      "name": "Call /converse (Text)",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        464,
+        780
+      ],
+      "retryOnFail": true,
+      "maxTries": 3,
+      "waitBetweenTries": 2000
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "http://127.0.0.1:8000/voice_converse",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ { \"client_phone\": $json.body.phone || $json.body.client_phone, \"client_name\": $json.body.client_name, \"audio_base64\": $json.body.audio_base64, \"content_type\": $json.body.content_type || \"audio/m4a\" } }}",
+        "options": {}
+      },
+      "id": "a1b2c3d4-call-voice-converse",
+      "name": "Call /voice_converse (Audio)",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        464,
+        980
+      ],
+      "retryOnFail": true,
+      "maxTries": 3,
+      "waitBetweenTries": 2000
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 1
+          },
+          "conditions": [
+            {
+              "leftValue": "={{ $json.response || $json.response_text }}",
+              "rightValue": "",
+              "operator": {
+                "type": "string",
+                "operation": "notEmpty"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "4e821974-3be9-4298-8c25-4ad9d2edea81",
+      "name": "Check API Success",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [
+        720,
+        880
+      ]
+    },
+    {
+      "parameters": {
+        "assignments": {
+          "assignments": [
+            {
+              "name": "success",
+              "value": "={{ false }}",
+              "type": "boolean"
             },
             {
-              "conditions": {
-                "options": {"caseSensitive": true, "leftValue": "", "typeValidation": "strict"},
-                "conditions": [
-                  {
-                    "leftValue": "={{$json.intent}}",
-                    "rightValue": "reschedule",
-                    "operator": {"type": "string", "operation": "equals"}
-                  }
-                ],
-                "combinator": "and"
-              },
-              "outputKey": "reschedule"
+              "name": "response",
+              "value": "={{ 'Sorry, something went wrong processing that request. Please try again shortly.' }}",
+              "type": "string"
             },
             {
-              "conditions": {
-                "options": {"caseSensitive": true, "leftValue": "", "typeValidation": "strict"},
-                "conditions": [
-                  {
-                    "leftValue": "={{$json.intent}}",
-                    "rightValue": "cancel",
-                    "operator": {"type": "string", "operation": "equals"}
-                  }
-                ],
-                "combinator": "and"
-              },
-              "outputKey": "cancel"
-            },
-            {
-              "conditions": {
-                "options": {"caseSensitive": true, "leftValue": "", "typeValidation": "strict"},
-                "conditions": [
-                  {
-                    "leftValue": "={{$json.intent}}",
-                    "rightValue": "query",
-                    "operator": {"type": "string", "operation": "equals"}
-                  }
-                ],
-                "combinator": "and"
-              },
-              "outputKey": "query"
+              "name": "phone",
+              "value": "={{ $('Call Outcome Webhook').item.json.body.phone || $('Call Outcome Webhook').item.json.body.client_phone }}",
+              "type": "string"
             }
           ]
         },
-        "options": {"fallbackOutput": "none"}
-      },
-      "id": "switch_node",
-      "name": "Route by Intent",
-      "type": "n8n-nodes-base.switch",
-      "typeVersion": 3,
-      "position": [200, 300]
-    },
-    {
-      "parameters": {
-        "method": "POST",
-        "url": "http://localhost:8000/book",
-        "sendBody": true,
-        "specifyBody": "json",
-        "jsonBody": "={{ $json }}",
         "options": {}
       },
-      "id": "book_node",
-      "name": "Call /book",
-      "type": "n8n-nodes-base.httpRequest",
-      "typeVersion": 4.2,
-      "position": [460, 100]
-    },
-    {
-      "parameters": {
-        "method": "POST",
-        "url": "http://localhost:8000/reschedule",
-        "sendBody": true,
-        "specifyBody": "json",
-        "jsonBody": "={{ $json }}",
-        "options": {}
-      },
-      "id": "reschedule_node",
-      "name": "Call /reschedule",
-      "type": "n8n-nodes-base.httpRequest",
-      "typeVersion": 4.2,
-      "position": [460, 260]
-    },
-    {
-      "parameters": {
-        "method": "POST",
-        "url": "http://localhost:8000/cancel",
-        "sendBody": true,
-        "specifyBody": "json",
-        "jsonBody": "={{ $json }}",
-        "options": {}
-      },
-      "id": "cancel_node",
-      "name": "Call /cancel",
-      "type": "n8n-nodes-base.httpRequest",
-      "typeVersion": 4.2,
-      "position": [460, 420]
-    },
-    {
-      "parameters": {
-        "method": "POST",
-        "url": "http://localhost:8000/query",
-        "sendBody": true,
-        "specifyBody": "json",
-        "jsonBody": "={{ $json }}",
-        "options": {}
-      },
-      "id": "query_node",
-      "name": "Call /query",
-      "type": "n8n-nodes-base.httpRequest",
-      "typeVersion": 4.2,
-      "position": [460, 580]
+      "id": "872cc6f5-97a4-431f-b1ad-3402a063276d",
+      "name": "Build Failure Response",
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.4,
+      "position": [
+        944,
+        992
+      ]
     },
     {
       "parameters": {
         "respondWith": "allIncomingItems",
         "options": {}
       },
-      "id": "respond_node",
+      "id": "0383f574-84a7-4a3c-95c1-e24186e28555",
       "name": "Respond to Caller Pipeline",
       "type": "n8n-nodes-base.respondToWebhook",
       "typeVersion": 1.1,
-      "position": [720, 300]
+      "position": [
+        1184,
+        880
+      ]
     }
   ],
+  "pinData": {},
   "connections": {
     "Call Outcome Webhook": {
-      "main": [[{"node": "Route by Intent", "type": "main", "index": 0}]]
-    },
-    "Route by Intent": {
       "main": [
-        [{"node": "Call /book", "type": "main", "index": 0}],
-        [{"node": "Call /reschedule", "type": "main", "index": 0}],
-        [{"node": "Call /cancel", "type": "main", "index": 0}],
-        [{"node": "Call /query", "type": "main", "index": 0}]
+        [
+          {
+            "node": "Is Audio Input?",
+            "type": "main",
+            "index": 0
+          }
+        ]
       ]
     },
-    "Call /book": {"main": [[{"node": "Respond to Caller Pipeline", "type": "main", "index": 0}]]},
-    "Call /reschedule": {"main": [[{"node": "Respond to Caller Pipeline", "type": "main", "index": 0}]]},
-    "Call /cancel": {"main": [[{"node": "Respond to Caller Pipeline", "type": "main", "index": 0}]]},
-    "Call /query": {"main": [[{"node": "Respond to Caller Pipeline", "type": "main", "index": 0}]]}
+    "Is Audio Input?": {
+      "main": [
+        [
+          {
+            "node": "Call /voice_converse (Audio)",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Call /converse (Text)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Call /converse (Text)": {
+      "main": [
+        [
+          {
+            "node": "Check API Success",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Call /voice_converse (Audio)": {
+      "main": [
+        [
+          {
+            "node": "Check API Success",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Check API Success": {
+      "main": [
+        [
+          {
+            "node": "Respond to Caller Pipeline",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Build Failure Response",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Build Failure Response": {
+      "main": [
+        [
+          {
+            "node": "Respond to Caller Pipeline",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
   },
   "active": false,
-  "settings": {"executionOrder": "v1"}
+  "settings": {
+    "executionOrder": "v1",
+    "binaryMode": "separate",
+    "availableInMCP": false
+  },
+  "versionId": "v2-unified-voice-converse",
+  "meta": {
+    "instanceId": "0fbbf1a1ae557ebf05b35d5c7df809e15f38f7c2ef723ecbbb64a066299e28f1"
+  },
+  "nodeGroups": [],
+  "id": "DYAfta5eQh0tHdjA-voice",
+  "tags": []
 }
