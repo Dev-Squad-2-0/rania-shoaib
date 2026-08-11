@@ -14,13 +14,27 @@ this file is the retrieval logic the agent's tool nodes will wrap).
 
 from sqlalchemy import create_engine, text
 import chromadb
+import os
 
-DATABASE_URL = "postgresql://rania:mm1234@localhost:5432/realestate_agent"
+DATABASE_URL = os.environ.get(
+    "DATABASE_URL",
+    "postgresql://rania:mm1234@localhost:5432/realestate_agent"
+)
 PERSIST_DIR = "./chroma_store"
 CHROMA_COLLECTION = "realestate_knowledge"  # from ingest_chroma.py
 
 engine = create_engine(DATABASE_URL)
-chroma_client = chromadb.PersistentClient(path=PERSIST_DIR)
+
+# CHROMA_MODE=http  -> connect to a ChromaDB container (docker-compose)
+# CHROMA_MODE=local -> connect to a local PersistentClient directory (dev)
+_chroma_mode = os.environ.get("CHROMA_MODE", "local").lower()
+if _chroma_mode == "http":
+    chroma_client = chromadb.HttpClient(
+        host=os.environ.get("CHROMA_HOST", "localhost"),
+        port=int(os.environ.get("CHROMA_PORT", "8001")),
+    )
+else:
+    chroma_client = chromadb.PersistentClient(path=PERSIST_DIR)
 
 from chromadb.utils import embedding_functions
 

@@ -23,7 +23,10 @@ interactive test UI) before pointing n8n at it.
 
 import os
 import base64
-from fastapi import FastAPI, UploadFile, File, Form, Header, Response, HTTPException
+import time
+import logging
+import json as _json
+from fastapi import FastAPI, UploadFile, File, Form, Header, Response, HTTPException, Request
 from fastapi.responses import HTMLResponse, FileResponse
 from pydantic import BaseModel
 from typing import Optional
@@ -36,11 +39,91 @@ from query_agent import answer_query
 from appointment_manager import book_appointment, reschedule_appointment, cancel_appointment
 from agent_graph import build_graph
 
+# ---------------------------------------------------------------
+# STRUCTURED LOGGING (Day 6 Task 4 — Monitoring)
+# JSON lines to stdout so docker logs / log aggregators (Datadog,
+# CloudWatch, Loki) can parse without a custom format string.
+# ---------------------------------------------------------------
+class _JsonFormatter(logging.Formatter):
+    def format(self, record: logging.LogRecord) -> str:
+        base = {
+            "ts": self.formatTime(record, "%Y-%m-%dT%H:%M:%S"),
+            "level": record.levelname,
+            "logger": record.name,
+            "msg": record.getMessage(),
+        }
+        if record.exc_info:
+            base["exc"] = self.formatException(record.exc_info)
+        extra = {k: v for k, v in record.__dict__.items()
+                 if k not in logging.LogRecord.__dict__ and not k.startswith("_")}
+        base.update(extra)
+        return _json.dumps(base, ensure_ascii=False)
+
+_handler = logging.StreamHandler()
+_handler.setFormatter(_JsonFormatter())
+logging.basicConfig(level=os.environ.get("LOG_LEVEL", "INFO").upper(), handlers=[_handler])
+log = logging.getLogger("ayesha")
+
 crm.ensure_table()
 crm_store.ensure_tables()
 
 app = FastAPI(title="RealEstate Hub Voice Agent API")
 graph_app = build_graph()
+
+
+# ---------------------------------------------------------------
+# REQUEST LOGGING MIDDLEWARE
+# Logs every request: method, path, status, latency. Keeps the
+# per-endpoint code clean — monitoring data comes from here, not
+# scattered print() calls.
+# ---------------------------------------------------------------
+@app.middleware("http")
+async def log_requests(request: Request, call_next):
+    start = time.perf_counter()
+    response = await call_next(request)
+    latency_ms = round((time.perf_counter() - start) * 1000, 1)
+    log.info(
+        "request",
+        extra={
+            "method": request.method,
+            "path": request.url.path,
+            "status": response.status_code,
+            "latency_ms": latency_ms,
+        },
+    )
+    return response
+
+
+# ---------------------------------------------------------------
+# HEALTH CHECK (Day 6 Task 5 — Deployment Readiness)
+# Docker HEALTHCHECK and load balancers hit this. Checks that the
+# DB is reachable and the graph is loaded — not just "process is up".
+# ---------------------------------------------------------------
+@app.get("/health")
+def health_check():
+    checks = {}
+    # DB
+    try:
+        import crm_store as _cs
+        _cs.get_session_state("__healthcheck__")
+        checks["postgres"] = "ok"
+    except Exception as exc:
+        checks["postgres"] = f"error: {exc}"
+    # Graph
+    checks["graph"] = "ok" if graph_app else "not loaded"
+    # ChromaDB
+    try:
+        from retriever import chroma_client
+        chroma_client.heartbeat()
+        checks["chromadb"] = "ok"
+    except Exception as exc:
+        checks["chromadb"] = f"error: {exc}"
+
+    all_ok = all(v == "ok" for v in checks.values())
+    status_code = 200 if all_ok else 503
+    from fastapi.responses import JSONResponse
+    return JSONResponse({"status": "ok" if all_ok else "degraded", "checks": checks},
+                        status_code=status_code)
 
 
 @app.get("/", response_class=HTMLResponse)

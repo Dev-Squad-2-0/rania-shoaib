@@ -1,4 +1,29 @@
+version: "3.9"
+
+# ---------------------------------------------------------------
+# RealEstate Hub Voice Agent — Full Stack
+#
+# Services:
+#   postgres    — existing DB (your current voice-agent container, kept compatible)
+#   chromadb    — moved from local disk to a real persistent container
+#   agent       — FastAPI app (api_server.py)
+#   ngrok       — public HTTPS tunnel so Twilio/LiveKit can reach the agent
+#                 locally without deploying to a cloud. Remove this service
+#                 when you deploy to a real server.
+#
+# Usage:
+#   docker compose up --build          # first time
+#   docker compose up -d               # background after first build
+#   docker compose logs -f agent       # tail app logs
+#   docker compose down                # stop everything (data persists in volumes)
+#   docker compose down -v             # stop + wipe all volumes (destructive)
+# ---------------------------------------------------------------
+
 services:
+
+  # ---- PostgreSQL ------------------------------------------------
+  # Kept exactly as your existing voice-agent container config so the
+  # existing pgdata volume is reused without a migration.
   postgres:
     image: postgres:16
     container_name: realestate-db
@@ -10,6 +35,95 @@ services:
       - "5432:5432"
     volumes:
       - pgdata:/var/lib/postgresql/data
+      # Init scripts: schema + seed run once on first container creation.
+      # If pgdata volume already exists with data, these are skipped.
+      - ./schema.sql:/docker-entrypoint-initdb.d/01_schema.sql:ro
+      - ./seed_data.sql:/docker-entrypoint-initdb.d/02_seed.sql:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U rania -d realestate_agent"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    restart: unless-stopped
+
+  # ---- ChromaDB --------------------------------------------------
+  # Moves ChromaDB from a local ./chroma_store directory (which doesn't
+  # exist inside the agent container) to a proper persistent service.
+  # The agent connects to it via HTTP (CHROMA_HOST/CHROMA_PORT env vars).
+  chromadb:
+    image: chromadb/chroma:0.5.3
+    container_name: realestate-chroma
+    environment:
+      - IS_PERSISTENT=TRUE
+      - ANONYMIZED_TELEMETRY=FALSE
+    ports:
+      - "8001:8000"
+    volumes:
+      - chromadata:/chroma/chroma
+    healthcheck:
+      test: ["CMD-SHELL", "curl -f http://localhost:8000/api/v1/heartbeat || exit 1"]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+    restart: unless-stopped
+
+  # ---- Voice Agent (FastAPI) -------------------------------------
+  agent:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: realestate-agent
+    env_file:
+      - .env
+    environment:
+      # DB — point at the postgres service, not localhost
+      DATABASE_URL: postgresql://rania:mm1234@postgres:5432/realestate_agent
+      # ChromaDB — point at the chromadb service, not local disk
+      CHROMA_HOST: chromadb
+      CHROMA_PORT: "8000"
+      CHROMA_MODE: http          # tells retriever.py to use HttpClient not PersistentClient
+      # Runtime config
+      PORT: "8000"
+      LOG_LEVEL: info
+    ports:
+      - "8000:8000"
+    volumes:
+      # Service account JSON for Google Calendar — mount read-only so it
+      # doesn't get baked into the image (never COPY credentials into an image)
+      - ./google_service_account.json:/app/google_service_account.json:ro
+    depends_on:
+      postgres:
+        condition: service_healthy
+      chromadb:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD-SHELL", "curl -f http://localhost:8000/health || exit 1"]
+      interval: 30s
+      timeout: 10s
+      start_period: 60s   # give it time to load the sentence-transformer model
+      retries: 3
+    restart: unless-stopped
+
+  # ---- ngrok (local tunnel for Twilio webhooks) ------------------
+  # Gives Twilio/LiveKit a public HTTPS URL pointing at the agent running
+  # on your machine. Remove this service when you move to a real server
+  # (EC2, Railway, Render, etc.) — replace with a proper reverse proxy.
+  # Set NGROK_AUTHTOKEN in your .env (free account at ngrok.com).
+  ngrok:
+    image: ngrok/ngrok:latest
+    container_name: realestate-ngrok
+    environment:
+      NGROK_AUTHTOKEN: ${NGROK_AUTHTOKEN}
+    command: http agent:8000 --log stdout
+    ports:
+      - "4040:4040"   # ngrok web UI — visit http://localhost:4040 to see the public URL
+    depends_on:
+      - agent
+    restart: unless-stopped
+    profiles:
+      - tunnel   # only starts with: docker compose --profile tunnel up
+
 
 volumes:
   pgdata:
+  chromadata:

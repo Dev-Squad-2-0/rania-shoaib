@@ -1,0 +1,182 @@
+name: Voice Agent CI
+
+on:
+  push:
+    branches: [main, dev]
+  pull_request:
+    branches: [main]
+
+jobs:
+  # ---------------------------------------------------------------
+  # 1. LINT + UNIT TESTS (no server needed)
+  # ---------------------------------------------------------------
+  test:
+    name: Lint & Unit Tests
+    runs-on: ubuntu-latest
+
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: rania
+          POSTGRES_PASSWORD: mm1234
+          POSTGRES_DB: realestate_agent
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+
+    env:
+      DATABASE_URL: postgresql://rania:mm1234@localhost:5432/realestate_agent
+      CHROMA_MODE: local
+      GATEWAY_API_KEY: ${{ secrets.GATEWAY_API_KEY }}
+      GATEWAY_BASE_URL: ${{ secrets.GATEWAY_BASE_URL }}
+      GATEWAY_MODEL: smart
+      DEEPGRAM_API_KEY: ${{ secrets.DEEPGRAM_API_KEY }}
+      FISH_API_KEY: ${{ secrets.FISH_API_KEY }}
+      FISH_REFERENCE_ID: 16344fa6cc2a46a09825a0871cecc0a6
+      GOOGLE_CALENDAR_ID: ${{ secrets.GOOGLE_CALENDAR_ID }}
+      LOG_LEVEL: warning
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python 3.11
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+
+      - name: Install dependencies
+        run: pip install -r requirements.txt
+
+      - name: Apply DB schema
+        run: psql "$DATABASE_URL" -f schema.sql -f seed_data.sql
+
+      - name: Lint (ruff)
+        run: |
+          pip install ruff
+          ruff check . --select E,F,W --ignore E501
+
+      - name: Run existing unit tests
+        run: |
+          python tests/test_multiturn_fix.py
+          python tests/test_recommended_scoring.py
+
+  # ---------------------------------------------------------------
+  # 2. DOCKER BUILD CHECK
+  # Makes sure the image builds cleanly on every push — catches
+  # missing imports, bad COPY paths, broken requirements before
+  # they hit a real deployment.
+  # ---------------------------------------------------------------
+  docker-build:
+    name: Docker Build
+    runs-on: ubuntu-latest
+    needs: test
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Build image (no push)
+        uses: docker/build-push-action@v5
+        with:
+          context: .
+          push: false
+          tags: realestate-agent:ci
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+  # ---------------------------------------------------------------
+  # 3. INTEGRATION TESTS (full stack, server running)
+  # Only runs on push to main — too slow for every PR.
+  # ---------------------------------------------------------------
+  integration:
+    name: Integration Tests
+    runs-on: ubuntu-latest
+    needs: docker-build
+    if: github.ref == 'refs/heads/main'
+
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: rania
+          POSTGRES_PASSWORD: mm1234
+          POSTGRES_DB: realestate_agent
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+
+      chromadb:
+        image: chromadb/chroma:0.5.3
+        ports:
+          - 8001:8000
+        env:
+          IS_PERSISTENT: "FALSE"  # ephemeral for CI
+
+    env:
+      DATABASE_URL: postgresql://rania:mm1234@localhost:5432/realestate_agent
+      CHROMA_MODE: http
+      CHROMA_HOST: localhost
+      CHROMA_PORT: "8001"
+      GATEWAY_API_KEY: ${{ secrets.GATEWAY_API_KEY }}
+      GATEWAY_BASE_URL: ${{ secrets.GATEWAY_BASE_URL }}
+      GATEWAY_MODEL: smart
+      DEEPGRAM_API_KEY: ${{ secrets.DEEPGRAM_API_KEY }}
+      FISH_API_KEY: ${{ secrets.FISH_API_KEY }}
+      FISH_REFERENCE_ID: 16344fa6cc2a46a09825a0871cecc0a6
+      GOOGLE_CALENDAR_ID: ${{ secrets.GOOGLE_CALENDAR_ID }}
+      LOG_LEVEL: warning
+      RESET_TIMEOUT_S: "30"
+      MAX_TURN_LATENCY_S: "25"
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python 3.11
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+
+      - name: Install dependencies
+        run: pip install -r requirements.txt
+
+      - name: Apply DB schema + seed
+        run: psql "$DATABASE_URL" -f schema.sql -f seed_data.sql
+
+      - name: Ingest ChromaDB
+        run: python ingest_chroma.py
+
+      - name: Start server in background
+        run: |
+          uvicorn api_server:app --host 0.0.0.0 --port 8000 &
+          echo $! > /tmp/server.pid
+          # Wait for health check to pass (up to 90s for model load)
+          for i in $(seq 1 18); do
+            sleep 5
+            curl -sf http://localhost:8000/health && break
+            echo "Waiting for server... ($((i*5))s)"
+          done
+          curl -sf http://localhost:8000/health || (echo "Server failed to start" && exit 1)
+
+      - name: Run full conversation eval suite
+        run: |
+          python tests/test_full_conversation_suite.py
+        env:
+          BASE_URL: http://localhost:8000
+          FILTER: ""  # run everything
+
+      - name: Stop server
+        if: always()
+        run: kill $(cat /tmp/server.pid) 2>/dev/null || true

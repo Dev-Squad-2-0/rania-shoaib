@@ -12,8 +12,12 @@ Run this file directly once to create the table:
 """
 
 from sqlalchemy import create_engine, text
+import os
 
-DATABASE_URL = "postgresql://rania:mm1234@localhost:5432/realestate_agent"
+DATABASE_URL = os.getenv(
+    "DATABASE_URL",
+    "postgresql://rania:mm1234@localhost:5432/realestate_agent",  # local fallback
+)
 engine = create_engine(DATABASE_URL)
 
 CREATE_TABLE_SQL = """
