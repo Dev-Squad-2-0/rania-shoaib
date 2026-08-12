@@ -24,6 +24,7 @@ interactive test UI) before pointing n8n at it.
 import os
 import base64
 import time
+import asyncio
 import logging
 import json as _json
 from fastapi import FastAPI, UploadFile, File, Form, Header, Response, HTTPException, Request
@@ -54,8 +55,14 @@ class _JsonFormatter(logging.Formatter):
         }
         if record.exc_info:
             base["exc"] = self.formatException(record.exc_info)
-        extra = {k: v for k, v in record.__dict__.items()
-                 if k not in logging.LogRecord.__dict__ and not k.startswith("_")}
+        extra = {}
+        for k, v in record.__dict__.items():
+            if k not in logging.LogRecord.__dict__ and not k.startswith("_"):
+                try:
+                    _json.dumps(v)
+                    extra[k] = v
+                except (TypeError, ValueError):
+                    extra[k] = str(v)
         base.update(extra)
         return _json.dumps(base, ensure_ascii=False)
 
@@ -564,3 +571,112 @@ async def voice_converse_file_endpoint(
             "X-Conversation-Ended": str(conv_resp.conversation_ended),
         }
     )
+
+# ---------------------------------------------------------------
+# /chat/completions — OpenAI Compatible Endpoint for Vapi
+# Streams immediately so Vapi never times out waiting for the
+# first byte, even when booking/reschedule/cancel take 30+ s.
+# The graph runs in a thread executor; SSE keepalive comments
+# are emitted every second so Vapi's timer keeps resetting.
+# ---------------------------------------------------------------
+@app.post("/chat/completions")
+async def chat_completions_endpoint(request: Request):
+    body = await request.json()
+    messages = body.get("messages", [])
+
+    user_messages = [m for m in messages if m.get("role") == "user"]
+    latest_user_message = user_messages[-1].get("content", "") if user_messages else ""
+    if not latest_user_message:
+        latest_user_message = "Hello"
+
+    call_id = request.headers.get("x-vapi-call-id", "vapi_default_session")
+    print(f"[chat/completions] Handling request for {call_id}: {latest_user_message}")
+
+    converse_req = ConverseRequest(
+        client_phone=call_id,
+        client_name="Vapi Caller",
+        message=latest_user_message,
+    )
+
+    is_stream = body.get("stream", False)
+
+    if is_stream:
+        from fastapi.responses import StreamingResponse
+        import json
+        import concurrent.futures
+
+        async def event_generator():
+            # Run the blocking graph in a thread so this coroutine
+            # can yield SSE keepalive comments immediately, preventing
+            # Vapi from timing out during long calendar/email operations.
+            loop = asyncio.get_event_loop()
+            future = loop.run_in_executor(None, converse_endpoint, converse_req)
+
+            # Emit SSE keepalive comments every second while we wait.
+            # Vapi ignores ": keepalive" lines but they reset its idle timer.
+            while not future.done():
+                yield ": keepalive\n\n"
+                await asyncio.sleep(1)
+
+            try:
+                conv_resp = await future
+                response_text = conv_resp.response
+            except Exception as e:
+                print(f"[chat/completions] ERROR: {e}")
+                response_text = f"Maafi, meri taraf se ek masla aa gaya: {type(e).__name__}. Thori der baad dobara try karein."
+                print(f"[chat/completions] GRAPH ERROR DETAIL: {e}")
+
+            print(f"[chat/completions] Graph response: {response_text}")
+
+            # Stream the response word-by-word
+            words = response_text.split(" ")
+            for i, word in enumerate(words):
+                chunk = word + (" " if i < len(words) - 1 else "")
+                delta = {"role": "assistant", "content": chunk} if i == 0 else {"content": chunk}
+                data = {
+                    "id": f"chatcmpl-{call_id}",
+                    "object": "chat.completion.chunk",
+                    "created": int(time.time()),
+                    "model": body.get("model", "voice-agent"),
+                    "choices": [{"index": 0, "delta": delta, "finish_reason": None}],
+                }
+                yield f"data: {json.dumps(data)}\n\n"
+                await asyncio.sleep(0.01)
+
+            # Final stop chunk
+            final_data = {
+                "id": f"chatcmpl-{call_id}",
+                "object": "chat.completion.chunk",
+                "created": int(time.time()),
+                "model": body.get("model", "voice-agent"),
+                "choices": [{"index": 0, "delta": {}, "finish_reason": "stop"}],
+            }
+            yield f"data: {json.dumps(final_data)}\n\n"
+            yield "data: [DONE]\n\n"
+
+        return StreamingResponse(event_generator(), media_type="text/event-stream")
+
+    # Non-streaming fallback
+    try:
+        conv_resp = converse_endpoint(converse_req)
+        response_text = conv_resp.response
+    except Exception as e:
+        print(f"[chat/completions] ERROR (non-stream): {type(e).__name__}: {e}")
+        response_text = "Maafi, meri taraf se ek masla aa gaya. Thori der baad dobara try karein."
+
+    print(f"[chat/completions] Graph response: {response_text}")
+
+    return {
+        "id": f"chatcmpl-{call_id}",
+        "object": "chat.completion",
+        "created": int(time.time()),
+        "model": body.get("model", "voice-agent"),
+        "choices": [
+            {
+                "index": 0,
+                "message": {"role": "assistant", "content": response_text},
+                "finish_reason": "stop",
+            }
+        ],
+        "usage": {"prompt_tokens": 0, "completion_tokens": 0, "total_tokens": 0},
+    }

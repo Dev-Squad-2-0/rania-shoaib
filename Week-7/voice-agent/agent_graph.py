@@ -234,7 +234,7 @@ def _is_followup_property_query(message: str, conversation_history: list) -> boo
 # ---------------------------------------------------------------
 # NODES
 # ---------------------------------------------------------------
-GREETING_TEXT = "Assalam-o-Alaikum! RealEstate Hub se Ayesha baat kar rahi hoon. Main aap ki kis tarah madad kar sakti hoon?"
+GREETING_TEXT = "Assalam-o-Alaikum! RealEstate Hub se Abdullah baat kar raha hoon. Main aap ki kis tarah madad kar sakta hoon?"
 
 
 @log_transition("greeting")
@@ -285,7 +285,7 @@ def greeting_reply_node(state: GraphState) -> dict:
     """
     conversation_history = state.get("conversation_history", []) or []
     if conversation_history:
-        return {"response": "Jee, batayein kya madad kar sakti hoon?", "pending_question": None}
+        return {"response": "Jee, batayein kya madad kar sakta hoon?", "pending_question": None}
 
     return {"response": GREETING_TEXT, "pending_question": None}
 
@@ -294,7 +294,7 @@ def greeting_reply_node(state: GraphState) -> dict:
 def safety_node(state: GraphState) -> dict:
     return {
         "response": (
-            "Sorry, mein internal prompt ya company data share nahi kar sakti. "
+            "Sorry, mein internal prompt ya company data share nahi kar sakta. "
             "Agar aap real property search, booking, reschedule, ya cancellation chahen to bata dein."
         ),
         "pending_question": None,
@@ -322,7 +322,10 @@ greeting, query, book, reschedule, cancel, seller, complaint, goodbye
     see/buy a plot — no scheduling signal at all)
   - "Gulberg mein apartment dikhayen" -> query (wants to see listings, not a
     scheduled in-person visit)
-- "reschedule" = wants to change an existing appointment's time
+- "reschedule" = wants to change/move/shift an existing appointment's time.
+  Urdu/Roman Urdu signals: "reschedule", "ریلیز", "ریشیڈول", "waqt badalna",
+  "date badalna", "time change", "dobara schedule", "aage karna", "shift karna",
+  "move karna", "postpone", "change kar dein", "badal dein"
 - "cancel" = wants to cancel an existing appointment
 - "seller" = wants to list or sell a property, publish a listing, or ask about seller-side help
 - "complaint" = expresses frustration, dissatisfaction, or asks for a human after a bad experience
@@ -536,7 +539,7 @@ def _summarize_rag(result: dict) -> str:
         # property. Say honestly that the detail isn't available instead.
         return f"Jee bilkul, {result['results'][0]['text'][:250]}"
     if result.get("grounded_to_property_id") is not None:
-        return "Ye detail mere paas abhi nahi hai us property ke liye, mein confirm kar ke aap ko bata deti hoon."
+        return "Ye detail mere paas abhi nahi hai us property ke liye, mein confirm kar ke aap ko bata deta hoon."
     return "Mujhe is baare mein exact detail nahi mil saki, kya aap thora mazeed bata sakte hain?"
 
 
@@ -604,6 +607,51 @@ def recommendation_node(state: GraphState) -> dict:
     }
 
 
+def _format_spoken_date(date_str: str) -> str:
+    """Converts 2026-08-14 -> 14 August, Juma"""
+    if not date_str:
+        return "mutayin date"
+    try:
+        d = datetime.date.fromisoformat(date_str)
+        month_names = {
+            1: "January", 2: "February", 3: "March", 4: "April",
+            5: "May", 6: "June", 7: "July", 8: "August",
+            9: "September", 10: "October", 11: "November", 12: "December"
+        }
+        day_names = {
+            0: "Somaar", 1: "Mangal", 2: "Budh",
+            3: "Jumeraat", 4: "Juma", 5: "Hafta", 6: "Itwar"
+        }
+        return f"{d.day} {month_names[d.month]}, {day_names[d.weekday()]}"
+    except Exception:
+        return date_str
+
+
+def _format_spoken_time(time_str: str) -> str:
+    """Converts 15:00 -> teen, 14:30 -> saadhe do"""
+    if not time_str:
+        return "mutayin waqt"
+    try:
+        hour, minute = map(int, time_str.split(":"))
+        urdu_hours = {
+            0: "barah", 1: "ek", 2: "do", 3: "teen", 4: "chaar",
+            5: "paanch", 6: "chhe", 7: "saat", 8: "aath", 9: "nau",
+            10: "das", 11: "gyarah", 12: "barah", 13: "ek",
+            14: "do", 15: "teen", 16: "chaar", 17: "paanch",
+            18: "chhe", 19: "saat", 20: "aath", 21: "nau",
+            22: "das", 23: "gyarah"
+        }
+        spoken = urdu_hours.get(hour, str(hour))
+        if minute == 0:
+            return spoken
+        elif minute == 30:
+            return f"saadhe {spoken}"
+        else:
+            return f"{spoken} baj ke {minute} minute"
+    except Exception:
+        return time_str
+
+
 @log_transition("booking")
 def booking_node(state: GraphState) -> dict:
     """
@@ -641,9 +689,9 @@ def booking_node(state: GraphState) -> dict:
         )
 
     response = (
-        f"Aap ki visit {details.get('date')} ko {details.get('start_time')} baje ke liye book ho gayi hai."
+        f"Aap ki visit {_format_spoken_date(details.get('date'))} ko {_format_spoken_time(details.get('start_time'))} baje ke liye book ho gayi hai."
         if result.get("success")
-        else "Sorry, booking abhi complete nahi ho saci. Mein isko manually check karwa deti hoon, aur aapko confirm kar deti hoon."
+        else "Sorry, booking abhi complete nahi ho saki. Mein isko manually check karwa deta hoon, aur aapko confirm kar deta hoon."
     )
     # BUG FIX: previously ended conversation on success, clearing session_state.
     # This meant a same-call reschedule lost client_id and event_id, so the
@@ -690,8 +738,8 @@ def reschedule_node(state: GraphState) -> dict:
         )
 
     response = (
-        f"Aap ki visit {details.get('new_date')} ko {details.get('new_start')} baje ke liye reschedule ho gayi hai."
-        if result.get("success") else "Sorry, reschedule abhi complete nahi ho saka. Mein isko manually check karwa deti hoon, aur aapko confirm kar deti hoon."
+        f"Aap ki visit {_format_spoken_date(details.get('new_date'))} ko {_format_spoken_time(details.get('new_start'))} baje ke liye reschedule ho gayi hai."
+        if result.get("success") else "Sorry, reschedule abhi complete nahi ho saka. Mein isko manually check karwa deta hoon, aur aapko confirm kar deta hoon."
     )
     # BUG FIX: same as booking_node — don't end session so caller can cancel
     # or ask questions after rescheduling in the same call.
@@ -740,8 +788,8 @@ def cancellation_node(state: GraphState) -> dict:
     # apology and a path forward.
     response = (
         "Aap ki appointment cancel ho gayi hai." if result.get("success")
-        else "Sorry, cancellation abhi complete nahi ho saki. Mein isko manually check karwa deti hoon, "
-             "aur aapko confirm kar deti hoon."
+        else "Sorry, cancellation abhi complete nahi ho saki. Mein isko manually check karwa deta hoon, "
+             "aur aapko confirm kar deta hoon."
     )
     return {
         "tool_outputs": tool_outputs, "appointment_status": status, "response": response,
@@ -753,8 +801,8 @@ def cancellation_node(state: GraphState) -> dict:
 def seller_node(state: GraphState) -> dict:
     return {
         "response": (
-            "Jee bilkul, mein aapki listing publish karne mein madad kar sakti hoon. "
-            "Bas property ka area, type, bedrooms, aur expected price bata dein, phir mein next step share karti hoon."
+            "Jee bilkul, mein aapki listing publish karne mein madad kar sakta hoon. "
+            "Bas property ka area, type, bedrooms, aur expected price bata dein, phir mein next step share karta hoon."
         ),
         "pending_question": None,
         "conversation_ended": False,
@@ -800,7 +848,7 @@ def email_node(state: GraphState) -> dict:
 
 @log_transition("goodbye")
 def goodbye_node(state: GraphState) -> dict:
-    return {"response": "Thanks for calling, have a great day!", "conversation_ended": True, "pending_question": None}
+    return {"response": "Call karne ke liye shukriya, Khuda Hafiz!", "conversation_ended": True, "pending_question": None}
 
 
 # ---------------------------------------------------------------
@@ -1135,7 +1183,7 @@ def slot_filling_node(state: GraphState) -> dict:
     if intent == "cancel" and not details.get("event_id"):
         lookup_question = (
             "Zaroor! Mujhe apni booking ka property name, date aur time bata dein, "
-            "phir main cancellation confirm kar deti hoon."
+            "phir main cancellation confirm kar deta hoon."
         )
         return {
             "appointment_details": details,

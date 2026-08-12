@@ -27,6 +27,8 @@ import datetime as dt
 from dotenv import load_dotenv, find_dotenv
 from google.oauth2 import service_account
 from googleapiclient.discovery import build
+import socket
+
 
 from retry_utils import retry_with_backoff
 
@@ -39,7 +41,13 @@ CALENDAR_ID = os.environ.get("GOOGLE_CALENDAR_ID")
 TIMEZONE = "Asia/Karachi"
 
 
+_SERVICE_CACHE = None
+
 def _get_service():
+    global _SERVICE_CACHE
+    if _SERVICE_CACHE is not None:
+        return _SERVICE_CACHE
+
     if not CALENDAR_ID:
         raise RuntimeError("GOOGLE_CALENDAR_ID not found — check your .env file")
     if not os.path.exists(SERVICE_ACCOUNT_FILE):
@@ -50,7 +58,9 @@ def _get_service():
     credentials = service_account.Credentials.from_service_account_file(
         SERVICE_ACCOUNT_FILE, scopes=SCOPES
     )
-    return build("calendar", "v3", credentials=credentials)
+    socket.setdefaulttimeout(10)  # applies to all socket connections globally
+    _SERVICE_CACHE = build("calendar", "v3", credentials=credentials)
+    return _SERVICE_CACHE
 
 
 @retry_with_backoff(max_attempts=3, base_delay=1.0)

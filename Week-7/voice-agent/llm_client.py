@@ -41,7 +41,7 @@ GATEWAY_BASE_URL = "https://llm.netixsol.com/v1"
 GATEWAY_MODEL = "smart"
 
 GROQ_BASE_URL = "https://api.groq.com/openai/v1"
-GROQ_MODEL = os.environ.get("GROQ_MODEL", "llama-3.1-8b-instant")
+GROQ_MODEL = os.environ.get("GROQ_MODEL", "llama-3.3-70b-versatile")
 
 # Every LLM call in the app should time out and raise instead of hanging
 # forever if the backend is capped/unresponsive — an unbounded client

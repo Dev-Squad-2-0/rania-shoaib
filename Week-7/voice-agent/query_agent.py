@@ -27,7 +27,7 @@ from openai import RateLimitError, APIError, APITimeoutError
 from system_prompt import SYSTEM_PROMPT
 from recommend import recommend_properties
 from llm_client import client, MODEL as GATEWAY_MODEL
-from price_format import format_pkr_with_raw, format_pkr_delta
+from price_format import format_pkr_with_raw, format_pkr_delta, format_pkr
 
 load_dotenv(find_dotenv())
 
@@ -331,8 +331,8 @@ def _render_spoken_answer(user_query: str, matches: list[dict], criteria: dict) 
         return _stable_variant(
             user_query,
             [
-                f"{city} mein hamare paas abhi listings nahi hain, lekin main aapko is area mein availability aane par batati hoon.",
-                f"{city} ke liye hamare paas abhi koi property available nahi hai. Kya aap kisi doosre city ya area mein dekhna chahengi?",
+                f"{city} mein hamare paas abhi listings nahi hain, lekin main aapko is area mein availability aane par batata hoon.",
+                f"{city} ke liye hamare paas abhi koi property available nahi hai. Kya aap kisi doosre city ya area mein dekhna chahenge?",
             ],
         )
 
@@ -347,7 +347,7 @@ def _render_spoken_answer(user_query: str, matches: list[dict], criteria: dict) 
 
     top = matches[0]
     price = top.get("price") or top.get("rent_per_month")
-    price_str = format_pkr_with_raw(price)
+    price_str = format_pkr(price)
     location_str = _summarize_location(top)
     gap_str = _summarize_gaps(top, criteria)
     exact_match = not gap_str and top.get("match_score", 0) >= 99.9
@@ -362,8 +362,8 @@ def _render_spoken_answer(user_query: str, matches: list[dict], criteria: dict) 
             f"yeh option aapki requirement ke kaafi close hai: {top['title']}",
         ]
         followups = [
-            "Kya aap iske liye visit schedule karna chahengi?",
-            "Aap chahengi to mein visit ke liye next step bata deti hoon.",
+            "Kya aap iske liye visit schedule karna chahenge?",
+            "Aap chahenge to mein visit ke liye next step bata deta hoon.",
         ]
         return f"{opener}, {_stable_variant(top['title'], body_options)}{f', {location_str}' if location_str else ''}, price {price_str}. {_stable_variant(top['title'], followups)}"
 
@@ -412,8 +412,8 @@ def _render_spoken_answer(user_query: str, matches: list[dict], criteria: dict) 
     followup = _stable_variant(
         top.get("title", "") + user_query,
         [
-            "Kya aap isko dekhna chahengi?",
-            "Aap chahengi to mein iski visit arrange kar doon?",
+            "Kya aap isko dekhna chahenge?",
+            "Aap chahenge to mein iski visit arrange kar doon?",
             "Kya mein is option ke liye next step share karun?",
         ],
     )
